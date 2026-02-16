@@ -65,6 +65,31 @@ The sync engine is designed to work with rootless Podman + systemd user units. F
 3. State directory: `~/.local/state/quadsyncd/`
 4. After sync, Podman's generator creates units: `systemctl --user list-units | grep container`
 
+## Git Workflow (Atomic + Conventional Commits)
+
+When making changes in this repository:
+
+- Make atomic commits: one discrete task/logical change per commit.
+  - Avoid mixing unrelated changes (e.g., drive-by refactors, formatting-only edits, or dependency bumps) with feature/bugfix work.
+  - Each commit should be independently reviewable.
+
+- Use Conventional Commits for all commit messages (scope optional):
+  - Format: `type(scope?): subject`
+  - Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `build`
+  - Keep the subject short, imperative, and lowercase (no trailing period).
+  - Use the body to explain the why when it is not obvious.
+
+- Run the fast validation loop before each commit and fix failures:
+  ```bash
+  go mod tidy && git diff --exit-code && make lint && make test && make vuln
+  ```
+  - Run `make fmt` as needed (especially before lint) to keep diffs clean.
+
+Examples:
+- `fix(sync): handle missing quadlet dir`
+- `docs: clarify rootless systemd prerequisites`
+- `refactor(config): isolate validation helpers`
+
 ## Code Conventions
 
 ### Architecture Principles
@@ -171,13 +196,17 @@ Triggered on `v*` tags:
 ## Release Process
 
 1. Ensure main branch is stable (CI passing)
-2. Tag release:
+2. Run the validation loop:
+   ```bash
+   go mod tidy && git diff --exit-code && make lint && make test && make vuln
+   ```
+3. Tag release:
    ```bash
    git tag -a v0.1.0 -m "Initial release"
    git push origin v0.1.0
    ```
-3. GitHub Actions automatically builds and publishes release
-4. Announce in README/docs if needed
+4. GitHub Actions automatically builds and publishes release
+5. Announce in README/docs if needed
 
 ## Future: Webhook Daemon (`serve` command)
 
@@ -229,6 +258,9 @@ make lint
 # Review output and fix issues
 # Re-run to verify
 make lint
+# Run full validation loop
+go mod tidy && git diff --exit-code
+make test && make vuln
 ```
 
 ### Debugging Sync Issues
@@ -252,7 +284,8 @@ cat ~/.local/state/quadsyncd/state.json
 ## Summary for Agents
 
 When working on this codebase:
-- Run `make fmt test lint` before committing
+- Make atomic Conventional Commits (type(scope?): subject) for each discrete task
+- Before each commit, run: `go mod tidy && git diff --exit-code && make lint && make test && make vuln` (and `make fmt` as needed)
 - Keep sync logic testable (use interfaces, avoid direct syscalls in core logic)
 - Never commit secrets
 - Follow systemd rootless conventions (user units, `~/.config/`, `~/.local/`)
