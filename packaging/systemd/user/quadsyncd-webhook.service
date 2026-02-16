@@ -1,0 +1,17 @@
+[Unit]
+Description=quadsyncd webhook listener (rootless)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=%h/.config/quadsyncd/config.yaml
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/quadsyncd serve --config %h/.config/quadsyncd/config.yaml
+WorkingDirectory=%h
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

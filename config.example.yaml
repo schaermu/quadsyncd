@@ -1,0 +1,49 @@
+# quadsyncd configuration example
+# Copy this file to ~/.config/quadsyncd/config.yaml and customize
+
+# Git repository configuration
+repo:
+  # Repository URL (supports SSH or HTTPS)
+  url: "git@github.com:ORG/REPO.git"
+  # Git ref to track (branch, tag, or commit)
+  ref: "refs/heads/main"
+  # Subdirectory within the repo containing quadlet files
+  subdir: "quadlets"
+
+# Path configuration
+paths:
+  # Where to sync quadlet files (systemd user quadlet directory)
+  # Supports ${HOME} and other environment variable expansion
+  quadlet_dir: "${HOME}/.config/containers/systemd"
+  # State directory for repo checkout and managed file tracking
+  state_dir: "${HOME}/.local/state/quadsyncd"
+
+# Sync behavior
+sync:
+  # Whether to remove managed quadlet files that no longer exist in the repo
+  prune: true
+  # Restart policy after sync: "none", "changed", or "all-managed"
+  # - none: only run daemon-reload
+  # - changed: restart units whose quadlet files changed
+  # - all-managed: restart all units from managed quadlet files
+  restart: "changed"
+
+# Authentication configuration (choose one)
+auth:
+  # Path to SSH private key for git operations
+  ssh_key_file: "${HOME}/.ssh/quadsyncd_deploy_key"
+  # OR: Path to file containing GitHub personal access token for HTTPS
+  # https_token_file: "${HOME}/.config/quadsyncd/github_token"
+
+# Webhook server configuration (optional; for future daemon mode)
+serve:
+  # Enable webhook listener
+  enabled: false
+  # Listen address (bind to localhost; use reverse proxy for external access)
+  listen_addr: "127.0.0.1:8787"
+  # Path to file containing GitHub webhook secret for signature verification
+  github_webhook_secret_file: "${HOME}/.config/quadsyncd/webhook_secret"
+  # Event types to accept from GitHub
+  allowed_event_types: ["push"]
+  # Git refs to accept (e.g., only trigger on main branch pushes)
+  allowed_refs: ["refs/heads/main"]
