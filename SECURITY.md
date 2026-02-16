@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Quadsyncd is currently in early development. Security updates will be provided for the latest release only.
+quadsyncd is currently in early development. Security updates will be provided for the latest release only.
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -15,7 +15,7 @@ Once version 1.0 is released, we will establish a more formal support policy.
 
 ### Running Rootless
 
-Quadsyncd is designed to run entirely in userspace without root privileges. This is a fundamental security principle:
+quadsyncd is designed to run entirely in userspace without root privileges. This is a fundamental security principle:
 
 - All operations use `systemctl --user` (never root systemd)
 - Files are managed in user directories (`~/.config/`, `~/.local/`)
@@ -25,7 +25,7 @@ Quadsyncd is designed to run entirely in userspace without root privileges. This
 
 **Never commit secrets to the repository or configuration files.**
 
-Quadsyncd supports secure secret handling via file references:
+quadsyncd supports secure secret handling via file references:
 
 - `auth.ssh_key_file`: Path to SSH private key
 - `auth.https_token_file`: Path to file containing GitHub token
@@ -67,7 +67,7 @@ See `docs/webhook-reverse-proxy.md` for planned architecture.
 
 ### Supply Chain Security
 
-Quadsyncd follows these practices:
+quadsyncd follows these practices:
 
 - Dependencies are tracked in `go.mod` with checksums in `go.sum`
 - `govulncheck` runs in CI on every commit
@@ -119,14 +119,14 @@ When deploying quadsyncd:
 
 ## Security Assumptions
 
-Quadsyncd's threat model assumes:
+quadsyncd's threat model assumes:
 
 - The Git repository containing quadlet files is trusted and access-controlled
 - The server running quadsyncd is reasonably secured (not compromised)
 - SSH keys/tokens are stored with appropriate filesystem permissions
 - The systemd user session is isolated from other users on multi-user systems
 
-Quadsyncd does not protect against:
+quadsyncd does not protect against:
 
 - Malicious quadlet files in a compromised repository (garbage in, garbage out)
 - Compromised server with root access (rootless mode protects the host, not the user session)
