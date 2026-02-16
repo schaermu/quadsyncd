@@ -1,0 +1,16 @@
+[Unit]
+Description=quadsyncd quadlet sync (rootless)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=%h/.config/quadsyncd/config.yaml
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/quadsyncd sync --config %h/.config/quadsyncd/config.yaml
+WorkingDirectory=%h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=false
+
+[Install]
+WantedBy=default.target

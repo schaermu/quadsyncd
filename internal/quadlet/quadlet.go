@@ -1,0 +1,71 @@
+package quadlet
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// ValidExtensions are the recognized Podman Quadlet file extensions
+var ValidExtensions = []string{
+	".container",
+	".volume",
+	".network",
+	".kube",
+	".image",
+	".build",
+	".pod",
+}
+
+// IsQuadletFile returns true if the file has a valid quadlet extension
+func IsQuadletFile(path string) bool {
+	ext := filepath.Ext(path)
+	for _, valid := range ValidExtensions {
+		if ext == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// DiscoverFiles finds all quadlet files in the specified directory
+func DiscoverFiles(dir string) ([]string, error) {
+	var files []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if this is a quadlet file
+		if IsQuadletFile(path) {
+			files = append(files, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+// UnitNameFromQuadlet converts a quadlet filename to its systemd unit name
+// For example: myapp.container -> myapp.service
+func UnitNameFromQuadlet(quadletPath string) string {
+	base := filepath.Base(quadletPath)
+	nameWithoutExt := strings.TrimSuffix(base, filepath.Ext(base))
+	return nameWithoutExt + ".service"
+}
+
+// RelativePath returns the relative path from baseDir to target
+func RelativePath(baseDir, target string) (string, error) {
+	return filepath.Rel(baseDir, target)
+}
