@@ -32,6 +32,9 @@ jobs:
         run: |
           go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
 
+      - name: Integration Tests (Tier 1)
+        run: go test -tags=integration ./integration/tier1 -v
+
   build:
     strategy:
       fail-fast: false
