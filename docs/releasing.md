@@ -22,7 +22,7 @@ All checks must pass before proceeding.
 
 ## Tagging a Release
 
-Quadsyncd uses semantic versioning with a `v` prefix. Tag format: `v<major>.<minor>.<patch>`
+quadsyncd uses semantic versioning with a `v` prefix. Tag format: `v<major>.<minor>.<patch>`
 
 Examples:
 - `v0.1.0` - Initial release
