@@ -174,32 +174,12 @@ cat ~/.local/state/quadsyncd/state.json
 
 See `docs/deployment-rootless-systemd.md` for complete troubleshooting guide.
 
-## Development
+## Contributing
 
-### Local Setup
+We welcome contributions! Please see:
 
-```bash
-# Clone repository
-git clone https://github.com/schaermu/quadsyncd.git
-cd quadsyncd
-
-# Install dependencies and build
-go mod tidy
-make build
-
-# Run tests
-make test
-
-# Lint
-make lint
-
-# Check for vulnerabilities
-make vuln
-```
-
-### Contributing
-
-See `AGENTS.md` for detailed development guidelines and architecture documentation.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) - Development workflow, testing guidelines, and commit conventions
+- [`AGENTS.md`](AGENTS.md) - Instructions for AI coding agents (different audience)
 
 ## Security
 
@@ -208,7 +188,7 @@ See `AGENTS.md` for detailed development guidelines and architecture documentati
 - **Atomic writes**: File operations use temp files + rename for safety
 - **State tracking**: Only prunes files explicitly managed by quadsyncd
 
-To report security issues, see `SECURITY.md`.
+To report security issues, see [`SECURITY.md`](SECURITY.md).
 
 ## License
 
@@ -216,10 +196,12 @@ MIT License - see `LICENSE` for details.
 
 ## Documentation
 
-- [Deployment Guide](docs/deployment-rootless-systemd.md)
-- [Webhook Setup](docs/webhook-reverse-proxy.md) (planned)
-- [Development Guide](AGENTS.md)
-- [Contributing](CONTRIBUTING.md)
+- [Deployment Guide](docs/deployment-rootless-systemd.md) - Complete deployment and troubleshooting guide
+- [Webhook Setup](docs/webhook-reverse-proxy.md) - Webhook mode architecture (planned feature)
+- [Contributing](CONTRIBUTING.md) - Development workflow and guidelines
+- [Release Process](docs/releasing.md) - Release procedures for maintainers
+- [Security Policy](SECURITY.md) - Security considerations and vulnerability reporting
+- [Agent Instructions](AGENTS.md) - Operating instructions for AI coding agents
 
 ## Roadmap
 
