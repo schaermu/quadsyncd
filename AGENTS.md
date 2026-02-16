@@ -153,7 +153,7 @@ Must be documented in deployment guides.
 
 ### Pull Request / Push to Main (`.github/workflows/ci.yml`)
 
-1. Go version from `go.mod` baseline (1.23.x)
+1. Go version from `go.mod` baseline (1.26.x)
 2. `go mod tidy` check (must not produce diff)
 3. `go test ./...` with race detector
 4. `govulncheck ./...`

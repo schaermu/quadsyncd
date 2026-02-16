@@ -1,6 +1,6 @@
 module github.com/schaermu/quadsyncd
 
-go 1.23.0
+go 1.26.0
 
 require (
 	github.com/golangci/golangci-lint v1.64.8
