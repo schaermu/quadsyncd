@@ -21,16 +21,15 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code
-
-      - name: Test
-        run: go test -v -race -coverprofile=coverage.txt ./...
-
       - name: Govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Lint
         run: |
           go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
+
+      - name: Test
+        run: go test -v -race -coverprofile=coverage.txt ./...
 
       - name: Integration Tests (Tier 1)
         run: go test -tags=integration ./integration/tier1 -v

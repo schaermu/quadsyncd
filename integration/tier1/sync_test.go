@@ -463,7 +463,7 @@ func testDryRunMode(t *testing.T, h *Harness, ctx context.Context) {
 	}
 
 	// Assert stdout contains plan details
-	if !strings.Contains(stdout, "DRY RUN") && !strings.Contains(stdout, "Would") && !strings.Contains(stderr, "dry-run") {
+	if !strings.Contains(stdout, "dry-run") && !strings.Contains(stdout, "would") {
 		t.Error("stdout does not indicate dry-run mode")
 	}
 }

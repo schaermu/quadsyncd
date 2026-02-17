@@ -65,8 +65,14 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 		}
 	}
 
-	// Checkout the specified ref
-	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", ref)
+	// Checkout the specified ref, preferring the fetched remote branch when present
+	remoteRef := "origin/" + ref
+	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "rev-parse", "--verify", remoteRef)
+	if err := c.runCommand(cmd); err == nil {
+		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", remoteRef)
+	} else {
+		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", ref)
+	}
 	if err := c.runCommand(cmd); err != nil {
 		return "", fmt.Errorf("git checkout failed: %w", err)
 	}
