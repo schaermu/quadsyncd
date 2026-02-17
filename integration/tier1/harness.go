@@ -11,10 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
 
 const (
@@ -48,7 +49,7 @@ func (h *Harness) BuildImage(ctx context.Context) error {
 	h.t.Logf("Building image %s from %s", h.imageTag, dockerfileDir)
 
 	// Get absolute path to project root by finding go.mod
-	projectRoot, err := findProjectRoot()
+	projectRoot, err := testutil.FindProjectRoot()
 	if err != nil {
 		return fmt.Errorf("get project root: %w", err)
 	}
@@ -296,29 +297,3 @@ func (w *testWriter) Write(p []byte) (n int, err error) {
 }
 
 var _ io.Writer = (*testWriter)(nil)
-
-// findProjectRoot walks up the directory tree from the current file to find go.mod
-func findProjectRoot() (string, error) {
-	// Get the directory of this source file
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("failed to get caller information")
-	}
-
-	dir := filepath.Dir(filename)
-
-	// Walk up the directory tree looking for go.mod
-	for {
-		goModPath := filepath.Join(dir, "go.mod")
-		if _, err := os.Stat(goModPath); err == nil {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached the root without finding go.mod
-			return "", fmt.Errorf("go.mod not found in any parent directory")
-		}
-		dir = parent
-	}
-}
