@@ -65,16 +65,19 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 		}
 	}
 
-	// Checkout the specified ref, preferring the fetched remote branch when present
-	remoteRef := "origin/" + ref
-	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "rev-parse", "--verify", remoteRef)
-	if err := c.runCommand(cmd); err == nil {
-		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", remoteRef)
-	} else {
-		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", ref)
-	}
+	// Checkout the specified ref
+	// Strategy:
+	// 1. Try direct checkout (works for local branches, tags, commit hashes)
+	// 2. If that fails, try as a remote branch (origin/ref)
+	// This handles tags and commit hashes correctly, and prefers local refs when they exist
+	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", ref)
 	if err := c.runCommand(cmd); err != nil {
-		return "", fmt.Errorf("git checkout failed: %w", err)
+		// If direct checkout failed, try as a remote branch
+		remoteRef := "origin/" + ref
+		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", remoteRef)
+		if err := c.runCommand(cmd); err != nil {
+			return "", fmt.Errorf("git checkout failed for ref %q (tried both direct and remote): %w", ref, err)
+		}
 	}
 
 	// Get the commit hash

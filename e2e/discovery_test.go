@@ -37,7 +37,14 @@ func TestDiscovery(t *testing.T) {
 	if err := suite.StartContainer(ctx); err != nil {
 		t.Fatalf("start container: %v", err)
 	}
-	defer suite.StopAndRemove(ctx)
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cleanupCancel()
+
+		if err := suite.StopAndRemove(cleanupCtx); err != nil {
+			t.Logf("cleanup: stop and remove container: %v", err)
+		}
+	}()
 
 	// Run readiness probe
 	if err := suite.Ready(ctx); err != nil {

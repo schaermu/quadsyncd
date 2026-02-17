@@ -36,7 +36,11 @@ func TestTier1Sync(t *testing.T) {
 	if err := h.StartContainer(ctx); err != nil {
 		t.Fatalf("start container: %v", err)
 	}
-	defer h.Cleanup(ctx)
+
+	// Use a separate context for cleanup so it still runs even if the test context times out.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cleanupCancel()
+	defer h.Cleanup(cleanupCtx)
 
 	// Wait for container to be ready
 	time.Sleep(1 * time.Second)
@@ -454,9 +458,16 @@ func testDryRunMode(t *testing.T, h *Harness, ctx context.Context) {
 	}
 
 	// Assert shim log is empty (no systemctl calls)
+	// If the log file doesn't exist, that's fine (means no calls were made)
 	entries, err := h.ReadShimLog(ctx)
-	if err != nil && err.Error() != "exit status 1" {
-		t.Fatalf("read shim log: %v", err)
+	if err != nil {
+		// Check if it's a "file not found" error (exit code 1 from cat)
+		if !h.FileExists(ctx, shimLogPath) {
+			// File doesn't exist, so no systemctl calls were made - this is expected
+			entries = nil
+		} else {
+			t.Fatalf("read shim log: %v", err)
+		}
 	}
 	if len(entries) > 0 {
 		t.Errorf("systemctl called during dry-run: %v", entries)
