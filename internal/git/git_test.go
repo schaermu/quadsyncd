@@ -24,8 +24,9 @@ func initBareRepo(t *testing.T, dir, branch string) {
 }
 
 // commitFile creates or overwrites a file and commits it.
-func commitFile(t *testing.T, repoDir, name, content, msg string) {
+func commitFile(t *testing.T, repoDir, content, msg string) {
 	t.Helper()
+	const name = "hello.container"
 	if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func TestEnsureCheckout_UpdatesLocalBranch(t *testing.T) {
 	// Create a "remote" repo with an initial commit.
 	remoteDir := t.TempDir()
 	initBareRepo(t, remoteDir, "main")
-	commitFile(t, remoteDir, "hello.container", "version1\n", "Initial commit")
+	commitFile(t, remoteDir, "version1\n", "Initial commit")
 
 	// First checkout: clones the repo.
 	cloneDir := filepath.Join(t.TempDir(), "repo")
@@ -64,7 +65,7 @@ func TestEnsureCheckout_UpdatesLocalBranch(t *testing.T) {
 	}
 
 	// Push a new commit to the remote.
-	commitFile(t, remoteDir, "hello.container", "version2\n", "Update")
+	commitFile(t, remoteDir, "version2\n", "Update")
 
 	// Second checkout: must pick up the new commit.
 	commit2, err := client.EnsureCheckout(ctx, remoteDir, "main", cloneDir)
@@ -90,13 +91,13 @@ func TestEnsureCheckout_TagsStillWork(t *testing.T) {
 	// Create a remote repo with a tagged commit.
 	remoteDir := t.TempDir()
 	initBareRepo(t, remoteDir, "main")
-	commitFile(t, remoteDir, "hello.container", "tagged\n", "Tagged commit")
+	commitFile(t, remoteDir, "tagged\n", "Tagged commit")
 	if out, err := exec.Command("git", "-C", remoteDir, "tag", "v1.0").CombinedOutput(); err != nil {
 		t.Fatalf("tag: %v: %s", err, out)
 	}
 
 	// Add another commit so main moves ahead of the tag.
-	commitFile(t, remoteDir, "hello.container", "after-tag\n", "Post-tag commit")
+	commitFile(t, remoteDir, "after-tag\n", "Post-tag commit")
 
 	// Checkout the tag.
 	cloneDir := filepath.Join(t.TempDir(), "repo")
