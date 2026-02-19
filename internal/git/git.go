@@ -80,6 +80,14 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 		}
 	}
 
+	// For existing repos, the local branch may be stale after fetch.
+	// Reset to the remote tracking branch to pick up new commits.
+	// This is a no-op for fresh clones and silently ignored for tags/hashes.
+	if exists {
+		resetCmd := exec.CommandContext(ctx, "git", "-C", destDir, "reset", "--hard", "origin/"+ref)
+		_ = c.runCommand(resetCmd)
+	}
+
 	// Get the commit hash
 	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "rev-parse", "HEAD")
 	output, err := cmd.Output()
