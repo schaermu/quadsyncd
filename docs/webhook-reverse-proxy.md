@@ -1,8 +1,6 @@
 # Webhook Mode with Reverse Proxy Setup
 
-**Note: Webhook mode (`quadsyncd serve`) is planned for a future release.**
-
-This guide describes how to configure webhook mode once implemented, using a reverse proxy or tunnel service.
+This guide describes how to configure webhook mode using a reverse proxy or tunnel service.
 
 ## Architecture
 

@@ -12,6 +12,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
+	"github.com/schaermu/quadsyncd/internal/webhook"
 	"github.com/spf13/cobra"
 )
 
@@ -58,12 +59,11 @@ affected units based on the configured restart policy.`,
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the webhook server (planned for future)",
+	Short: "Start the webhook server",
 	Long: `Serve starts a long-running HTTP server that listens for GitHub webhook events
 and triggers syncs when the configured repository is updated.
 
-This mode requires additional configuration for webhook secrets and allowed refs.
-Note: This command is planned for a future release.`,
+This mode requires additional configuration for webhook secrets and allowed refs.`,
 	RunE: runServe,
 }
 
@@ -123,7 +123,42 @@ func runSync(cmd *cobra.Command, args []string) error {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	return fmt.Errorf("serve command not yet implemented (planned for future release)")
+	ctx, cancel := setupSignalHandler()
+	defer cancel()
+
+	// Setup logger
+	logger := setupLogger()
+
+	// Load configuration
+	cfg, err := loadConfig(logger)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Validate serve configuration
+	if !cfg.Serve.Enabled {
+		return fmt.Errorf("serve mode is not enabled in config (set serve.enabled: true)")
+	}
+
+	// Create dependencies
+	gitClient := git.NewShellClient(cfg.Auth.SSHKeyFile, cfg.Auth.HTTPSTokenFile)
+	systemdClient := systemduser.NewClient()
+
+	// Create webhook server
+	server, err := webhook.NewServer(cfg, gitClient, systemdClient, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create webhook server: %w", err)
+	}
+
+	// Start server
+	logger.Info("starting webhook server", "addr", cfg.Serve.ListenAddr)
+	if err := server.Start(ctx); err != nil {
+		logger.Error("webhook server failed", "error", err)
+		return err
+	}
+
+	logger.Info("webhook server stopped")
+	return nil
 }
 
 func setupLogger() *slog.Logger {
