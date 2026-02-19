@@ -49,12 +49,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
-	// Check systemd availability
-	available, err := e.systemd.IsAvailable(ctx)
-	if err != nil || !available {
-		return fmt.Errorf("systemd user session not available: %w", err)
-	}
-
 	// Fetch repository
 	e.logger.Info("fetching repository", "dest", e.cfg.RepoDir())
 	commit, err := e.git.EnsureCheckout(ctx, e.cfg.Repo.URL, e.cfg.Repo.Ref, e.cfg.RepoDir())
@@ -82,10 +76,17 @@ func (e *Engine) Run(ctx context.Context) error {
 		"update", len(plan.Update),
 		"delete", len(plan.Delete))
 
+	// check for dry-run mode
 	if e.dryRun {
 		e.logPlanDetails(plan)
-		e.logger.Info("dry run complete, no changes applied")
+		e.logger.Info("dry-run complete, no changes applied")
 		return nil
+	}
+
+	// Check systemd availability
+	available, err := e.systemd.IsAvailable(ctx)
+	if err != nil || !available {
+		return fmt.Errorf("systemd user session not available: %w", err)
 	}
 
 	// Apply plan
@@ -94,7 +95,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	// Save new state
-	newState := e.buildState(plan, commit)
+	newState := e.buildState(prevState, plan, commit)
 	if err := e.saveState(newState); err != nil {
 		return fmt.Errorf("failed to save state: %w", err)
 	}
@@ -359,13 +360,22 @@ func (e *Engine) logPlanDetails(plan *Plan) {
 }
 
 // buildState creates a new State from the applied plan
-func (e *Engine) buildState(plan *Plan, commit string) *State {
+func (e *Engine) buildState(prevState *State, plan *Plan, commit string) *State {
 	state := &State{
 		Commit:       commit,
 		ManagedFiles: make(map[string]ManagedFile),
 	}
 
-	// All add and update operations are now managed
+	if prevState != nil {
+		for destPath, managed := range prevState.ManagedFiles {
+			state.ManagedFiles[destPath] = managed
+		}
+	}
+
+	for _, op := range plan.Delete {
+		delete(state.ManagedFiles, op.DestPath)
+	}
+
 	for _, op := range append(plan.Add, plan.Update...) {
 		relPath, _ := quadlet.RelativePath(e.cfg.QuadletSourceDir(), op.SourcePath)
 		state.ManagedFiles[op.DestPath] = ManagedFile{

@@ -1,0 +1,36 @@
+name: e2e-discovery
+
+on:
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-discovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: E2E Discovery Tests
+        run: go test -tags=e2e_discovery ./e2e -v
+        timeout-minutes: 15
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: |
+            e2e/diag-*.log
+            e2e/diag-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
