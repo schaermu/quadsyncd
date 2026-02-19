@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
 
 const (
@@ -46,8 +48,8 @@ func (h *Harness) BuildImage(ctx context.Context) error {
 	h.t.Helper()
 	h.t.Logf("Building image %s from %s", h.imageTag, dockerfileDir)
 
-	// Get absolute path to project root (two levels up from integration/tier1)
-	projectRoot, err := filepath.Abs("../..")
+	// Get absolute path to project root by finding go.mod
+	projectRoot, err := testutil.FindProjectRoot()
 	if err != nil {
 		return fmt.Errorf("get project root: %w", err)
 	}

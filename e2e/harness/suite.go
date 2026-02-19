@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
 
 const (
@@ -122,8 +124,8 @@ func NewSuite(name string, t *testing.T, opts ...SuiteOption) *Suite {
 func (s *Suite) BuildImage(ctx context.Context) error {
 	s.Logf("Building image %s from %s", s.ImageTag, s.DockerfileDir)
 
-	// Get absolute path to project root (one level up from e2e)
-	projectRoot, err := filepath.Abs("..")
+	// Get absolute path to project root by finding go.mod
+	projectRoot, err := testutil.FindProjectRoot()
 	if err != nil {
 		return fmt.Errorf("get project root: %w", err)
 	}
