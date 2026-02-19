@@ -1,54 +1,65 @@
 # Copilot repository instructions (quadsyncd)
 
-You are reviewing changes in `quadsyncd`, a Go CLI that syncs Podman Quadlet files
-from a Git repository to a rootless Podman + systemd user environment.
+`quadsyncd` is a Go CLI that syncs Podman Quadlet files from a Git repository to a
+rootless Podman + systemd user environment.
 
-## What matters most in review
+## Non-negotiable rules
 
-- Rootless only: systemd interactions must use `systemctl --user` and operate in
-  user-owned paths under `~/.config` and `~/.local`. Never introduce root/system
-  service assumptions.
-- Never commit secrets: do not add tokens/keys/secrets to the repo. Config supports
-  file-based secret references:
-  - `auth.ssh_key_file`
-  - `auth.https_token_file`
-  - `serve.github_webhook_secret_file`
-- Tests: unit tests must not make network calls. Prefer temp dirs and mock
-  implementations for side effects (git/systemd/filesystem).
-- Logging: use `log/slog` structured logging (`logger.Info(..., "key", val)`).
-- Errors: return errors with context (`fmt.Errorf("...: %w", err)`); avoid panics in
-  non-main code.
+- **Rootless only:** all systemd calls must use `systemctl --user`; paths must live
+  under `~/.config` or `~/.local`. Never assume root or system-level services.
+- **No secrets in code:** never embed tokens, keys, or passwords. Use `*_file` config
+  fields (`auth.ssh_key_file`, `auth.https_token_file`,
+  `serve.github_webhook_secret_file`).
+- **No network in unit tests:** use `t.TempDir()` and mock interfaces instead.
+- **Structured logging:** always use `log/slog` with key/value pairs.
+- **Errors with context:** wrap with `fmt.Errorf("...: %w", err)`; no panics in
+  `internal/` packages.
+- **Conventional Commits:** commit messages must follow `type(scope): subject` format.
 
-## Where to look
+## Codebase map
 
-- CLI entrypoint/commands: `cmd/quadsyncd/main.go`
-- Sync engine: `internal/sync/*`
-- Config parsing/validation: `internal/config/*` (paths must be absolute after env expansion)
-- Side effects behind interfaces:
-  - git client: `internal/git/*`
-  - systemd user ops: `internal/systemduser/*`
-- Quadlet discovery/unit naming: `internal/quadlet/*`
-- systemd user unit files: `packaging/systemd/user/*`
+| Area | Path |
+|---|---|
+| CLI entrypoint | `cmd/quadsyncd/main.go` |
+| Sync engine | `internal/sync/` |
+| Config parsing + validation | `internal/config/` |
+| Git client interface | `internal/git/` |
+| systemd user interface | `internal/systemduser/` |
+| Quadlet discovery + unit naming | `internal/quadlet/` |
+| Test helpers / mocks | `internal/testutil/` |
+| systemd unit files | `packaging/systemd/user/` |
 
-## Validation expectations (match CI)
+## Validation (match CI)
 
-CI definition is authoritative: `.github/workflows/ci.yml`.
+CI is authoritative: see `.github/workflows/ci.yml`. Local equivalents via `Makefile`:
 
-Key constraints to enforce in review:
-- `go mod tidy` must not produce a diff (CI fails otherwise).
-- Tests run with race detector in CI.
-- Lint runs via golangci-lint; avoid introducing new lints.
+```bash
+go mod tidy && git diff --exit-code && make fmt && make lint && make test && make vuln
+```
 
-Local helpers exist in `Makefile` (`make fmt`, `make test`, `make lint`, `make vuln`, `make build`).
+## Domain invariants
 
-## Sync/domain invariants to sanity check
+- **Pruning:** only remove files quadsyncd itself wrote (tracked in state). Be careful
+  when `sync.prune` is enabled.
+- **Atomic writes:** quadlet dir writes must use a temp file + rename.
+- **Restart policy:**
+  - `none` → reload only
+  - `changed` → `try-restart` units whose quadlet changed
+  - `all-managed` → `try-restart` every managed unit
+- **Webhook (future):** bind `127.0.0.1` only; verify HMAC-SHA256 signature before
+  any processing; reject unsigned/invalid requests with HTTP 403.
 
-- Managed file tracking + pruning: only remove files quadsyncd manages; be careful
-  with delete semantics when `sync.prune` is enabled.
-- Atomic writes: writes to quadlet dir should remain atomic (temp + rename).
-- Restart policy semantics must stay consistent:
-  - `none`: reload only
-  - `changed`: try-restart affected units
-  - `all-managed`: try-restart all managed units
-- Webhook mode (if touched): must bind localhost-only (`127.0.0.1`) and verify
-  GitHub signatures before processing; reject invalid/unsigned requests early.
+## Reusable prompts
+
+Common tasks have step-by-step prompt files in `.github/prompts/`:
+
+- **Add a config field** → `.github/prompts/add-config-field.prompt.md`
+- **Add a quadlet extension** → `.github/prompts/add-quadlet-extension.prompt.md`
+
+## Scoped instructions
+
+File-type-specific rules live in `.github/instructions/`:
+
+- `go.instructions.md` – applies to `**/*.go`
+- `test.instructions.md` – applies to `**/*_test.go`
+- `yaml.instructions.md` – applies to `**/*.{yaml,yml}`
