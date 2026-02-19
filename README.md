@@ -110,16 +110,17 @@ The default mode runs `quadsyncd sync` periodically via systemd timer:
 
 **Frequency**: Configurable via timer (default: every 5 minutes with 30s jitter)
 
-### Webhook Mode (Planned)
+### Webhook Mode
 
-Future release will support a long-running `quadsyncd serve` that listens for GitHub webhooks:
+For instant updates, run `quadsyncd serve` as a long-running HTTP server that listens for GitHub webhooks:
 
 - Instant sync on push events
-- Signature verification
+- HMAC-SHA256 signature verification
+- Event type filtering (e.g., only `push` events)
 - Ref filtering (e.g., only sync on main branch)
-- Debouncing and single-flight execution
+- Debouncing and single-flight execution to prevent concurrent syncs
 
-See `docs/webhook-reverse-proxy.md` for planned architecture.
+See `docs/webhook-reverse-proxy.md` for deployment architecture.
 
 ## How It Works
 
@@ -143,7 +144,7 @@ See `docs/webhook-reverse-proxy.md` for planned architecture.
 # One-time sync
 quadsyncd sync [--dry-run] [--config path]
 
-# Future: Start webhook server
+# Start webhook server
 quadsyncd serve [--config path]
 
 # Show version
@@ -197,7 +198,7 @@ MIT License - see `LICENSE` for details.
 ## Documentation
 
 - [Deployment Guide](docs/deployment-rootless-systemd.md) - Complete deployment and troubleshooting guide
-- [Webhook Setup](docs/webhook-reverse-proxy.md) - Webhook mode architecture (planned feature)
+- [Webhook Setup](docs/webhook-reverse-proxy.md) - Webhook mode deployment with reverse proxy
 - [Contributing](CONTRIBUTING.md) - Development workflow and guidelines
 - [Release Process](docs/releasing.md) - Release procedures for maintainers
 - [Security Policy](SECURITY.md) - Security considerations and vulnerability reporting
@@ -209,7 +210,7 @@ MIT License - see `LICENSE` for details.
 - [x] SSH and HTTPS authentication
 - [x] Rootless systemd integration
 - [x] State tracking and pruning
-- [ ] Webhook mode with GitHub signature verification
+- [x] Webhook mode with GitHub signature verification
 - [ ] Systemd socket activation for webhooks
 - [ ] Multi-repo support
 - [ ] Dry-run web UI for visualizing changes
