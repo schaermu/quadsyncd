@@ -138,9 +138,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid sync.restart policy: %s (must be none, changed, or all-managed)", c.Sync.Restart)
 	}
 
-	// Validate auth: must have either SSH key or HTTPS token
-	if c.Auth.SSHKeyFile == "" && c.Auth.HTTPSTokenFile == "" {
-		return fmt.Errorf("auth: must specify either ssh_key_file or https_token_file")
+	// Validate auth: when auth is configured, the URL scheme must match
+	if c.Auth.SSHKeyFile != "" && !c.IsSSH() {
+		return fmt.Errorf("auth.ssh_key_file is set but repo.url does not use an SSH scheme (git@ or ssh://)")
+	}
+	if c.Auth.HTTPSTokenFile != "" && !c.IsHTTPS() {
+		return fmt.Errorf("auth.https_token_file is set but repo.url does not use HTTPS scheme")
 	}
 
 	// Validate serve config if enabled

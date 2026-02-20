@@ -118,7 +118,38 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "no auth method",
+			name: "no auth method is valid for public repos",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL: "https://github.com/test/repo.git",
+					Ref: "main",
+				},
+				Paths: PathsConfig{
+					QuadletDir: "/absolute/path",
+					StateDir:   "/absolute/state",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "ssh key with https url",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL: "https://github.com/test/repo.git",
+					Ref: "main",
+				},
+				Paths: PathsConfig{
+					QuadletDir: "/absolute/path",
+					StateDir:   "/absolute/state",
+				},
+				Auth: AuthConfig{
+					SSHKeyFile: "/key",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "https token with ssh url",
 			cfg: Config{
 				Repo: RepoConfig{
 					URL: "git@github.com:test/repo.git",
@@ -127,6 +158,9 @@ func TestValidate(t *testing.T) {
 				Paths: PathsConfig{
 					QuadletDir: "/absolute/path",
 					StateDir:   "/absolute/state",
+				},
+				Auth: AuthConfig{
+					HTTPSTokenFile: "/token",
 				},
 			},
 			wantErr: true,
