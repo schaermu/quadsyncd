@@ -57,6 +57,38 @@ func DiscoverFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
+// DiscoverAllFiles finds all files in the specified directory, including
+// non-quadlet companion files (e.g. environment files, config files).
+// Hidden files and directories (names starting with ".") are skipped.
+func DiscoverAllFiles(dir string) ([]string, error) {
+	var files []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden files and directories (e.g. .git, .gitignore)
+		if path != dir && strings.HasPrefix(info.Name(), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
 // UnitNameFromQuadlet converts a quadlet filename to its systemd unit name
 // For example: myapp.container -> myapp.service
 func UnitNameFromQuadlet(quadletPath string) string {

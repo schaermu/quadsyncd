@@ -125,3 +125,61 @@ func TestBuildPlan(t *testing.T) {
 		t.Errorf("expected 0 delete operations, got %d", len(plan.Delete))
 	}
 }
+
+func TestBuildPlan_CompanionFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	repoDir := filepath.Join(stateDir, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a quadlet file and a companion env file side-by-side in the repo
+	if err := os.WriteFile(filepath.Join(repoDir, "myapp.container"), []byte("[Container]\nImage=alpine\nEnvironmentFile=./myapp.env\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "myapp.env"), []byte("FOO=bar\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Repo: config.RepoConfig{Subdir: ""},
+		Paths: config.PathsConfig{
+			QuadletDir: quadletDir,
+			StateDir:   stateDir,
+		},
+		Sync: config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := &Engine{cfg: cfg, logger: logger}
+
+	prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
+	plan, err := engine.buildPlan(prevState)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both the quadlet file and the companion env file should be in the add list
+	if len(plan.Add) != 2 {
+		t.Errorf("expected 2 add operations (quadlet + companion), got %d", len(plan.Add))
+	}
+
+	// Verify the companion file destination path is in the quadlet dir
+	foundEnv := false
+	for _, op := range plan.Add {
+		if filepath.Base(op.DestPath) == "myapp.env" {
+			foundEnv = true
+			expectedDest := filepath.Join(quadletDir, "myapp.env")
+			if op.DestPath != expectedDest {
+				t.Errorf("companion file dest = %s, want %s", op.DestPath, expectedDest)
+			}
+		}
+	}
+	if !foundEnv {
+		t.Error("companion env file not found in add plan")
+	}
+}

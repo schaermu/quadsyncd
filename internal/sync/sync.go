@@ -124,13 +124,13 @@ func (e *Engine) buildPlan(prevState *State) (*Plan, error) {
 		Delete: make([]FileOp, 0),
 	}
 
-	// Discover all quadlet files in the source directory
-	sourceFiles, err := quadlet.DiscoverFiles(e.cfg.QuadletSourceDir())
+	// Discover all files in the source directory (quadlet files and companions)
+	sourceFiles, err := quadlet.DiscoverAllFiles(e.cfg.QuadletSourceDir())
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover quadlet files: %w", err)
+		return nil, fmt.Errorf("failed to discover source files: %w", err)
 	}
 
-	e.logger.Info("discovered quadlet files", "count", len(sourceFiles))
+	e.logger.Info("discovered source files", "count", len(sourceFiles))
 
 	// Build map of current desired files
 	desiredFiles := make(map[string]string) // destPath -> sourcePath
@@ -312,14 +312,19 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan) error {
 func (e *Engine) affectedUnits(plan *Plan) []string {
 	units := make(map[string]bool)
 
+	// Only quadlet files define systemd units
 	for _, op := range append(plan.Add, plan.Update...) {
-		unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-		units[unit] = true
+		if quadlet.IsQuadletFile(op.DestPath) {
+			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
+			units[unit] = true
+		}
 	}
 
 	for _, op := range plan.Delete {
-		unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-		units[unit] = true
+		if quadlet.IsQuadletFile(op.DestPath) {
+			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
+			units[unit] = true
+		}
 	}
 
 	result := make([]string, 0, len(units))
@@ -333,10 +338,12 @@ func (e *Engine) affectedUnits(plan *Plan) []string {
 func (e *Engine) allManagedUnits(plan *Plan) []string {
 	units := make(map[string]bool)
 
-	// Add/Update operations create managed units
+	// Only quadlet files define systemd units
 	for _, op := range append(plan.Add, plan.Update...) {
-		unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-		units[unit] = true
+		if quadlet.IsQuadletFile(op.DestPath) {
+			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
+			units[unit] = true
+		}
 	}
 
 	result := make([]string, 0, len(units))
