@@ -128,6 +128,9 @@ func TestValidate(t *testing.T) {
 					QuadletDir: "/absolute/path",
 					StateDir:   "/absolute/state",
 				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
 			},
 			wantErr: false,
 		},

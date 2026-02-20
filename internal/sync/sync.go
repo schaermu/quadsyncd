@@ -107,7 +107,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	// Handle restarts based on policy
-	if err := e.handleRestarts(ctx, plan); err != nil {
+	if err := e.handleRestarts(ctx, plan, newState); err != nil {
 		e.logger.Warn("restart operations had issues", "error", err)
 		// Don't fail the entire sync for restart issues
 	}
@@ -277,7 +277,7 @@ func (e *Engine) copyFile(src, dst string) error {
 }
 
 // handleRestarts restarts units based on the configured policy
-func (e *Engine) handleRestarts(ctx context.Context, plan *Plan) error {
+func (e *Engine) handleRestarts(ctx context.Context, plan *Plan, state *State) error {
 	switch e.cfg.Sync.Restart {
 	case config.RestartNone:
 		e.logger.Info("restart policy: none, skipping restarts")
@@ -295,7 +295,7 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan) error {
 
 	case config.RestartAllManaged:
 		// Restart all managed units
-		units := e.allManagedUnits(plan)
+		units := e.allManagedUnits(state)
 		if len(units) == 0 {
 			e.logger.Info("no managed units to restart")
 			return nil
@@ -308,22 +308,21 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan) error {
 	}
 }
 
-// affectedUnits returns unit names affected by the plan
+// affectedUnits returns unit names affected by the plan (added, updated, or deleted).
 func (e *Engine) affectedUnits(plan *Plan) []string {
-	units := make(map[string]bool)
+	ops := make([]FileOp, 0, len(plan.Add)+len(plan.Update)+len(plan.Delete))
+	ops = append(ops, plan.Add...)
+	ops = append(ops, plan.Update...)
+	ops = append(ops, plan.Delete...)
+	return quadletUnitsFromOps(ops)
+}
 
-	// Only quadlet files define systemd units
-	for _, op := range append(plan.Add, plan.Update...) {
-		if quadlet.IsQuadletFile(op.DestPath) {
-			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-			units[unit] = true
-		}
-	}
-
-	for _, op := range plan.Delete {
-		if quadlet.IsQuadletFile(op.DestPath) {
-			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-			units[unit] = true
+// allManagedUnits returns every unit tracked in state (not just changed ones).
+func (e *Engine) allManagedUnits(state *State) []string {
+	units := make(map[string]struct{})
+	for destPath := range state.ManagedFiles {
+		if quadlet.IsQuadletFile(destPath) {
+			units[quadlet.UnitNameFromQuadlet(destPath)] = struct{}{}
 		}
 	}
 
@@ -334,15 +333,13 @@ func (e *Engine) affectedUnits(plan *Plan) []string {
 	return result
 }
 
-// allManagedUnits returns all managed units from the plan
-func (e *Engine) allManagedUnits(plan *Plan) []string {
-	units := make(map[string]bool)
-
-	// Only quadlet files define systemd units
-	for _, op := range append(plan.Add, plan.Update...) {
+// quadletUnitsFromOps extracts unique systemd unit names from file operations,
+// considering only quadlet files (companion files do not generate units).
+func quadletUnitsFromOps(ops []FileOp) []string {
+	units := make(map[string]struct{})
+	for _, op := range ops {
 		if quadlet.IsQuadletFile(op.DestPath) {
-			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-			units[unit] = true
+			units[quadlet.UnitNameFromQuadlet(op.DestPath)] = struct{}{}
 		}
 	}
 

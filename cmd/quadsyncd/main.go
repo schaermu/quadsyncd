@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/schaermu/quadsyncd/internal/config"
@@ -198,7 +199,7 @@ func loadConfig(logger *slog.Logger) (*config.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user home directory: %w", err)
 		}
-		configPath = fmt.Sprintf("%s/.config/quadsyncd/config.yaml", home)
+		configPath = filepath.Join(home, ".config", "quadsyncd", "config.yaml")
 	}
 
 	logger.Info("loading configuration", "path", configPath)

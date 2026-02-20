@@ -637,3 +637,26 @@ func (m *slowMockGitClient) EnsureCheckout(_ context.Context, _, _, _ string) (s
 	<-m.proceed
 	return "abc123", nil
 }
+
+func TestSliceContains(t *testing.T) {
+	tests := []struct {
+		name  string
+		slice []string
+		s     string
+		want  bool
+	}{
+		{name: "found", slice: []string{"a", "b", "c"}, s: "b", want: true},
+		{name: "not found", slice: []string{"a", "b", "c"}, s: "d", want: false},
+		{name: "empty slice", slice: []string{}, s: "a", want: false},
+		{name: "nil slice", slice: nil, s: "a", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sliceContains(tt.slice, tt.s)
+			if got != tt.want {
+				t.Errorf("sliceContains(%v, %q) = %v, want %v", tt.slice, tt.s, got, tt.want)
+			}
+		})
+	}
+}
