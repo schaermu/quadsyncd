@@ -76,8 +76,11 @@ func NewServer(cfg *config.Config, gitClient git.Client, systemd systemduser.Sys
 	return s, nil
 }
 
-// Start starts the webhook HTTP server
+// Start starts the webhook HTTP server, performing an initial sync first.
 func (s *Server) Start(ctx context.Context) error {
+	s.logger.Info("performing initial sync before starting webhook server")
+	s.performSync(ctx)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleWebhook)
 
