@@ -18,7 +18,6 @@ const (
 	testStateDir    = "/test/state"
 	testStatePath   = "/test/state/state.json"
 	testQuadletFile = "/test/quadlet/hello.container"
-	testSSHKeyPath  = "/dev/null" // dummy, unused for local repo
 )
 
 func TestTier1Sync(t *testing.T) {
@@ -131,10 +130,7 @@ paths:
 sync:
   prune: %t
   restart: %s
-
-auth:
-  ssh_key_file: %s
-`, testRepoPath, testQuadletDir, testStateDir, prune, restart, testSSHKeyPath)
+`, testRepoPath, testQuadletDir, testStateDir, prune, restart)
 
 	if err := h.WriteFile(ctx, testConfigPath, config); err != nil {
 		t.Fatalf("write config: %v", err)
