@@ -259,11 +259,12 @@ func (s *Server) performSync(ctx context.Context) {
 	s.syncRunning = true
 	s.syncMu.Unlock()
 
+	runCtx := ctx
 	for {
 		s.logger.Info("performing sync operation")
 
 		engine := quadsyncd.NewEngine(s.cfg, s.git, s.systemd, s.logger, false)
-		if err := engine.Run(ctx); err != nil {
+		if err := engine.Run(runCtx); err != nil {
 			s.logger.Error("sync failed", "error", err)
 		} else {
 			s.logger.Info("sync completed successfully")
@@ -281,6 +282,11 @@ func (s *Server) performSync(ctx context.Context) {
 		s.syncPending = false
 		s.syncMu.Unlock()
 
+		// The pending request arrived independently of the original caller;
+		// use a fresh background context so that cancellation of the initial
+		// context (e.g. server shutdown signalled after the first sync was
+		// already queued) does not abort the re-run.
+		runCtx = context.Background()
 		s.logger.Info("re-running sync due to pending request")
 	}
 }
