@@ -139,6 +139,36 @@ func TestNewServer_MissingSecretFile(t *testing.T) {
 	}
 }
 
+func TestStart_PerformsInitialSync(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	// Cancel the context immediately so Start returns after the initial sync
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = server.Start(ctx)
+
+	if !mockGit.checkoutCalled {
+		t.Error("expected initial sync to call git checkout, but it was not called")
+	}
+}
+
 func TestVerifySignature(t *testing.T) {
 	cfg, secret := setupTestConfig(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
