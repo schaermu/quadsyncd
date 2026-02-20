@@ -216,3 +216,20 @@ func TestConfigHelpers(t *testing.T) {
 		t.Errorf("StateFilePath() = %s, want %s", got, filepath.Join(cfg.Paths.StateDir, "state.json"))
 	}
 }
+
+func TestApplyDefaults(t *testing.T) {
+	cfg := Config{}
+	cfg.applyDefaults()
+
+	if cfg.Sync.Restart != RestartChanged {
+		t.Errorf("applyDefaults() did not set restart policy, got %q, want %q", cfg.Sync.Restart, RestartChanged)
+	}
+
+	// Explicit value must not be overwritten
+	cfg2 := Config{Sync: SyncConfig{Restart: RestartNone}}
+	cfg2.applyDefaults()
+
+	if cfg2.Sync.Restart != RestartNone {
+		t.Errorf("applyDefaults() overwrote explicit restart policy, got %q, want %q", cfg2.Sync.Restart, RestartNone)
+	}
+}

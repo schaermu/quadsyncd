@@ -319,10 +319,10 @@ func (e *Engine) affectedUnits(plan *Plan) []string {
 
 // allManagedUnits returns every unit tracked in state (not just changed ones).
 func (e *Engine) allManagedUnits(state *State) []string {
-	units := make(map[string]struct{})
+	units := make(map[string]bool)
 	for destPath := range state.ManagedFiles {
 		if quadlet.IsQuadletFile(destPath) {
-			units[quadlet.UnitNameFromQuadlet(destPath)] = struct{}{}
+			units[quadlet.UnitNameFromQuadlet(destPath)] = true
 		}
 	}
 
@@ -336,10 +336,10 @@ func (e *Engine) allManagedUnits(state *State) []string {
 // quadletUnitsFromOps extracts unique systemd unit names from file operations,
 // considering only quadlet files (companion files do not generate units).
 func quadletUnitsFromOps(ops []FileOp) []string {
-	units := make(map[string]struct{})
+	units := make(map[string]bool)
 	for _, op := range ops {
 		if quadlet.IsQuadletFile(op.DestPath) {
-			units[quadlet.UnitNameFromQuadlet(op.DestPath)] = struct{}{}
+			units[quadlet.UnitNameFromQuadlet(op.DestPath)] = true
 		}
 	}
 
