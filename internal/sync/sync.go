@@ -130,7 +130,7 @@ func (e *Engine) buildPlan(prevState *State) (*Plan, error) {
 		return nil, fmt.Errorf("failed to discover source files: %w", err)
 	}
 
-	e.logger.Info("discovered quadlet files", "count", len(sourceFiles))
+	e.logger.Info("discovered source files", "count", len(sourceFiles))
 
 	// Build map of current desired files
 	desiredFiles := make(map[string]string) // destPath -> sourcePath
