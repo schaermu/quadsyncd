@@ -1,5 +1,7 @@
 # quadsyncd
 
+[![Coverage](.github/badges/coverage.svg)](https://github.com/schaermu/quadsyncd/actions/workflows/ci.yml)
+
 Automatically synchronize Podman Quadlet files from a Git repository to rootless Podman-enabled servers.
 
 ## Overview
