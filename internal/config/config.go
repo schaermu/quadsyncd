@@ -138,6 +138,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid sync.restart policy: %s (must be none, changed, or all-managed)", c.Sync.Restart)
 	}
 
+	// Validate auth: only one auth method may be configured
+	if c.Auth.SSHKeyFile != "" && c.Auth.HTTPSTokenFile != "" {
+		return fmt.Errorf("auth: only one of ssh_key_file or https_token_file may be set")
+	}
+
 	// Validate auth: when auth is configured, the URL scheme must match
 	if c.Auth.SSHKeyFile != "" && !c.IsSSH() {
 		return fmt.Errorf("auth.ssh_key_file is set but repo.url does not use an SSH scheme (git@ or ssh://)")

@@ -132,6 +132,24 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "both ssh key and https token set",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL: "git@github.com:test/repo.git",
+					Ref: "main",
+				},
+				Paths: PathsConfig{
+					QuadletDir: "/absolute/path",
+					StateDir:   "/absolute/state",
+				},
+				Auth: AuthConfig{
+					SSHKeyFile:     "/key",
+					HTTPSTokenFile: "/token",
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "ssh key with https url",
 			cfg: Config{
 				Repo: RepoConfig{
