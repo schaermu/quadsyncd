@@ -107,8 +107,9 @@ func (c *ShellClient) configureAuth(cmd *exec.Cmd, url string) error {
 
 	// SSH authentication
 	if c.sshKeyFile != "" && (strings.HasPrefix(url, "git@") || strings.HasPrefix(url, "ssh://")) {
-		// Use GIT_SSH_COMMAND to specify the SSH key
-		sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new -F /dev/null", c.sshKeyFile)
+		// Use GIT_SSH_COMMAND to specify the SSH key.
+		// The path is shell-quoted to prevent injection via crafted filenames.
+		sshCmd := fmt.Sprintf("ssh -i %s -o StrictHostKeyChecking=accept-new -F /dev/null", shellQuote(c.sshKeyFile))
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+sshCmd)
 		return nil
 	}
@@ -120,18 +121,39 @@ func (c *ShellClient) configureAuth(cmd *exec.Cmd, url string) error {
 			return fmt.Errorf("failed to read HTTPS token file: %w", err)
 		}
 
-		// Configure git credential helper to use the token
 		tokenStr := strings.TrimSpace(string(token))
 
-		// For GitHub, we can use the token as username with x-oauth-basic
-		// Set GIT_ASKPASS to provide credentials non-interactively
-		helper := fmt.Sprintf("!f() { echo '%s'; }; f", tokenStr)
-		cmd.Env = append(cmd.Env, "GIT_ASKPASS="+helper)
+		// Pass the token via environment variable and configure a git
+		// credential helper that reads it. This avoids embedding the
+		// token directly in a shell expression.
+		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = append(cmd.Env, "QUADSYNCD_GIT_TOKEN="+tokenStr)
+		cmd.Args = insertGitFlags(cmd.Args,
+			"-c", `credential.helper=!f() { echo "username=x-access-token"; echo "password=$QUADSYNCD_GIT_TOKEN"; }; f`,
+		)
 
 		return nil
 	}
 
 	return nil
+}
+
+// insertGitFlags inserts flags immediately after the "git" command name,
+// before the subcommand (e.g. "clone", "fetch").
+func insertGitFlags(args []string, flags ...string) []string {
+	if len(args) == 0 {
+		return flags
+	}
+	result := make([]string, 0, len(args)+len(flags))
+	result = append(result, args[0])
+	result = append(result, flags...)
+	result = append(result, args[1:]...)
+	return result
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // runCommand executes a command and returns an error with stderr on failure

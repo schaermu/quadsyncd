@@ -81,6 +81,9 @@ func Load(path string) (*Config, error) {
 	// Expand environment variables in string fields
 	cfg.expandEnv()
 
+	// Apply defaults
+	cfg.applyDefaults()
+
 	// Validate
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
@@ -100,6 +103,13 @@ func (c *Config) expandEnv() {
 	c.Auth.HTTPSTokenFile = os.ExpandEnv(c.Auth.HTTPSTokenFile)
 	c.Serve.ListenAddr = os.ExpandEnv(c.Serve.ListenAddr)
 	c.Serve.GitHubWebhookSecretFile = os.ExpandEnv(c.Serve.GitHubWebhookSecretFile)
+}
+
+// applyDefaults fills in zero-value fields with sensible defaults.
+func (c *Config) applyDefaults() {
+	if c.Sync.Restart == "" {
+		c.Sync.Restart = RestartChanged
+	}
 }
 
 // Validate checks the configuration for errors
@@ -132,8 +142,6 @@ func (c *Config) Validate() error {
 	switch c.Sync.Restart {
 	case RestartNone, RestartChanged, RestartAllManaged:
 		// valid
-	case "":
-		c.Sync.Restart = RestartChanged // default
 	default:
 		return fmt.Errorf("invalid sync.restart policy: %s (must be none, changed, or all-managed)", c.Sync.Restart)
 	}

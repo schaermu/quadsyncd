@@ -115,3 +115,67 @@ func TestEnsureCheckout_TagsStillWork(t *testing.T) {
 		t.Errorf("expected tagged content, got %q", string(got))
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "simple path", input: "/home/user/.ssh/key", want: "'/home/user/.ssh/key'"},
+		{name: "path with spaces", input: "/home/my user/key", want: "'/home/my user/key'"},
+		{name: "path with single quote", input: "/home/user's/key", want: "'/home/user'\\''s/key'"},
+		{name: "empty string", input: "", want: "''"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellQuote(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInsertGitFlags(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		flags []string
+		want  []string
+	}{
+		{
+			name:  "insert before subcommand",
+			args:  []string{"git", "clone", "--no-checkout", "url", "dest"},
+			flags: []string{"-c", "key=value"},
+			want:  []string{"git", "-c", "key=value", "clone", "--no-checkout", "url", "dest"},
+		},
+		{
+			name:  "insert before fetch",
+			args:  []string{"git", "-C", "/dir", "fetch", "origin"},
+			flags: []string{"-c", "cred=helper"},
+			want:  []string{"git", "-c", "cred=helper", "-C", "/dir", "fetch", "origin"},
+		},
+		{
+			name:  "empty args",
+			args:  []string{},
+			flags: []string{"-c", "key=value"},
+			want:  []string{"-c", "key=value"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := insertGitFlags(tt.args, tt.flags...)
+			if len(got) != len(tt.want) {
+				t.Fatalf("insertGitFlags() length = %d, want %d\ngot:  %v\nwant: %v", len(got), len(tt.want), got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("insertGitFlags()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

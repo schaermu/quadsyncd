@@ -11,30 +11,22 @@ import (
 
 func TestFileHash(t *testing.T) {
 	// Create a temp file
-	tmpfile, err := os.CreateTemp("", "test-*.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.Remove(tmpfile.Name())
-	}()
+	tmpDir := t.TempDir()
+	tmpPath := filepath.Join(tmpDir, "test.txt")
 
 	content := "test content"
-	if _, err := tmpfile.WriteString(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := tmpfile.Close(); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Compute hash
-	hash1, err := fileHash(tmpfile.Name())
+	hash1, err := fileHash(tmpPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify hash is consistent
-	hash2, err := fileHash(tmpfile.Name())
+	hash2, err := fileHash(tmpPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +36,11 @@ func TestFileHash(t *testing.T) {
 	}
 
 	// Verify hash changes when content changes
-	if err := os.WriteFile(tmpfile.Name(), []byte("different content"), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte("different content"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	hash3, err := fileHash(tmpfile.Name())
+	hash3, err := fileHash(tmpPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +52,7 @@ func TestFileHash(t *testing.T) {
 
 func TestBuildPlan(t *testing.T) {
 	// Create temporary directories
-	tmpDir, err := os.MkdirTemp("", "quadsyncd-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.RemoveAll(tmpDir)
-	}()
+	tmpDir := t.TempDir()
 
 	quadletDir := filepath.Join(tmpDir, "quadlet")
 	stateDir := filepath.Join(tmpDir, "state")
@@ -181,5 +167,59 @@ func TestBuildPlan_CompanionFiles(t *testing.T) {
 	}
 	if !foundEnv {
 		t.Error("companion env file not found in add plan")
+	}
+}
+
+func TestAllManagedUnits_IncludesUnchanged(t *testing.T) {
+	cfg := &config.Config{
+		Sync: config.SyncConfig{Restart: config.RestartAllManaged},
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := &Engine{cfg: cfg, logger: logger}
+
+	// State has two managed quadlet files and one companion file.
+	state := &State{
+		Commit: "abc",
+		ManagedFiles: map[string]ManagedFile{
+			"/quadlet/app.container": {SourcePath: "app.container", Hash: "aaa"},
+			"/quadlet/db.container":  {SourcePath: "db.container", Hash: "bbb"},
+			"/quadlet/app.env":       {SourcePath: "app.env", Hash: "ccc"},
+		},
+	}
+
+	units := engine.allManagedUnits(state)
+
+	// Expect two units (one per quadlet file); companion files are not units.
+	if len(units) != 2 {
+		t.Fatalf("allManagedUnits() returned %d units, want 2: %v", len(units), units)
+	}
+
+	want := map[string]bool{"app.service": true, "db.service": true}
+	for _, u := range units {
+		if !want[u] {
+			t.Errorf("unexpected unit %q in allManagedUnits result", u)
+		}
+	}
+}
+
+func TestQuadletUnitsFromOps(t *testing.T) {
+	ops := []FileOp{
+		{DestPath: "/quadlet/app.container"},
+		{DestPath: "/quadlet/app.env"}, // companion, not a unit
+		{DestPath: "/quadlet/db.container"},
+		{DestPath: "/quadlet/app.container"}, // duplicate
+	}
+
+	units := quadletUnitsFromOps(ops)
+
+	if len(units) != 2 {
+		t.Fatalf("quadletUnitsFromOps() returned %d units, want 2: %v", len(units), units)
+	}
+
+	want := map[string]bool{"app.service": true, "db.service": true}
+	for _, u := range units {
+		if !want[u] {
+			t.Errorf("unexpected unit %q", u)
+		}
 	}
 }

@@ -219,26 +219,18 @@ func (s *Server) verifySignature(body []byte, signature string) bool {
 
 // isEventTypeAllowed checks if the event type is in the allowed list
 func (s *Server) isEventTypeAllowed(eventType string) bool {
-	if len(s.cfg.Serve.AllowedEventTypes) == 0 {
-		return true // no filter configured
-	}
-
-	for _, allowed := range s.cfg.Serve.AllowedEventTypes {
-		if eventType == allowed {
-			return true
-		}
-	}
-	return false
+	return len(s.cfg.Serve.AllowedEventTypes) == 0 || sliceContains(s.cfg.Serve.AllowedEventTypes, eventType)
 }
 
 // isRefAllowed checks if the ref is in the allowed list
 func (s *Server) isRefAllowed(ref string) bool {
-	if len(s.cfg.Serve.AllowedRefs) == 0 {
-		return true // no filter configured
-	}
+	return len(s.cfg.Serve.AllowedRefs) == 0 || sliceContains(s.cfg.Serve.AllowedRefs, ref)
+}
 
-	for _, allowed := range s.cfg.Serve.AllowedRefs {
-		if ref == allowed {
+// sliceContains reports whether s is present in the slice.
+func sliceContains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
 			return true
 		}
 	}
