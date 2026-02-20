@@ -32,13 +32,15 @@ type GitHubPushEvent struct {
 
 // Server implements the webhook HTTP server
 type Server struct {
-	cfg       *config.Config
-	git       git.Client
-	systemd   systemduser.Systemd
-	logger    *slog.Logger
-	secret    []byte
-	syncMutex sync.Mutex // prevent concurrent syncs
-	debounce  *debouncer
+	cfg         *config.Config
+	git         git.Client
+	systemd     systemduser.Systemd
+	logger      *slog.Logger
+	secret      []byte
+	syncMu      sync.Mutex // guards syncRunning and syncPending
+	syncRunning bool       // whether a sync is currently in progress
+	syncPending bool       // whether another sync is needed after the current one
+	debounce    *debouncer
 }
 
 // debouncer implements debouncing for webhook events
@@ -243,23 +245,50 @@ func (s *Server) isRefAllowed(ref string) bool {
 	return false
 }
 
-// performSync executes the sync operation (single-flight)
+// performSync executes the sync operation with single-flight semantics.
+// If a sync is already in progress, at most one additional run is queued;
+// further concurrent requests are dropped to avoid unbounded goroutine pile-up.
 func (s *Server) performSync(ctx context.Context) {
-	s.syncMutex.Lock()
-	defer s.syncMutex.Unlock()
-
-	s.logger.Info("performing sync operation")
-
-	// Create sync engine
-	engine := quadsyncd.NewEngine(s.cfg, s.git, s.systemd, s.logger, false)
-
-	// Execute sync
-	if err := engine.Run(ctx); err != nil {
-		s.logger.Error("sync failed", "error", err)
+	s.syncMu.Lock()
+	if s.syncRunning {
+		s.syncPending = true
+		s.syncMu.Unlock()
+		s.logger.Info("sync already in progress, queuing pending re-run")
 		return
 	}
+	s.syncRunning = true
+	s.syncMu.Unlock()
 
-	s.logger.Info("sync completed successfully")
+	runCtx := ctx
+	for {
+		s.logger.Info("performing sync operation")
+
+		engine := quadsyncd.NewEngine(s.cfg, s.git, s.systemd, s.logger, false)
+		if err := engine.Run(runCtx); err != nil {
+			s.logger.Error("sync failed", "error", err)
+		} else {
+			s.logger.Info("sync completed successfully")
+		}
+
+		// Atomically check whether another sync was requested while we were
+		// running. If not, release the running slot and stop; if yes, clear
+		// the flag and loop to service that one pending request.
+		s.syncMu.Lock()
+		if !s.syncPending {
+			s.syncRunning = false
+			s.syncMu.Unlock()
+			break
+		}
+		s.syncPending = false
+		s.syncMu.Unlock()
+
+		// The pending request arrived independently of the original caller;
+		// use a fresh background context so that cancellation of the initial
+		// context (e.g. server shutdown signalled after the first sync was
+		// already queued) does not abort the re-run.
+		runCtx = context.Background()
+		s.logger.Info("re-running sync due to pending request")
+	}
 }
 
 // trigger schedules the callback to run after the debounce delay
