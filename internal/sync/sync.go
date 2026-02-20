@@ -312,14 +312,19 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan) error {
 func (e *Engine) affectedUnits(plan *Plan) []string {
 	units := make(map[string]bool)
 
+	// Only quadlet files define systemd units
 	for _, op := range append(plan.Add, plan.Update...) {
-		unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-		units[unit] = true
+		if quadlet.IsQuadletFile(op.DestPath) {
+			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
+			units[unit] = true
+		}
 	}
 
 	for _, op := range plan.Delete {
-		unit := quadlet.UnitNameFromQuadlet(op.DestPath)
-		units[unit] = true
+		if quadlet.IsQuadletFile(op.DestPath) {
+			unit := quadlet.UnitNameFromQuadlet(op.DestPath)
+			units[unit] = true
+		}
 	}
 
 	result := make([]string, 0, len(units))
