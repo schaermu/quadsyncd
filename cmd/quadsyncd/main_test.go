@@ -103,3 +103,21 @@ func TestSetupSignalHandler(t *testing.T) {
 		t.Fatal("expected context error after cancel, got nil")
 	}
 }
+
+func TestLoadConfig_DefaultPath(t *testing.T) {
+	origCfgFile := cfgFile
+	defer func() { cfgFile = origCfgFile }()
+	cfgFile = ""
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	_, err := loadConfig(logger)
+	// Expect error because the default config file doesn't exist
+	if err == nil {
+		t.Error("expected error when default config file doesn't exist")
+	}
+}
+
+func TestVersionCmd(t *testing.T) {
+	t.Helper()
+	// versionCmd.Run simply prints version info; should not panic.
+	versionCmd.Run(versionCmd, []string{})
+}

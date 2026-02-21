@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -815,5 +816,129 @@ func TestBuildPlan_UpdateAndDelete(t *testing.T) {
 	// No adds
 	if len(plan.Add) != 0 {
 		t.Errorf("expected 0 adds, got %d", len(plan.Add))
+	}
+}
+
+func TestLoadState_CorruptedJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Paths: config.PathsConfig{StateDir: stateDir},
+	}
+	engine := &Engine{cfg: cfg, logger: testLogger()}
+	// Write invalid JSON
+	if err := os.WriteFile(cfg.StateFilePath(), []byte("{invalid json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := engine.loadState()
+	if err == nil {
+		t.Error("expected error for corrupted JSON, got nil")
+	}
+}
+
+func TestHandleRestarts_ChangedNoQuadletChanges(t *testing.T) {
+	ms := &mockSystemd{available: true}
+	cfg := &config.Config{
+		Sync: config.SyncConfig{Restart: config.RestartChanged},
+	}
+	engine := &Engine{cfg: cfg, systemd: ms, logger: testLogger()}
+	plan := &Plan{
+		Add: []FileOp{{DestPath: "/quadlet/myapp.env", SourcePath: "/src/myapp.env"}},
+	}
+	state := &State{ManagedFiles: map[string]ManagedFile{}}
+	err := engine.handleRestarts(context.Background(), plan, state)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if ms.restartCalled {
+		t.Error("TryRestartUnits should not be called when there are no quadlet changes")
+	}
+}
+
+func TestHandleRestarts_AllManagedNoQuadletFiles(t *testing.T) {
+	ms := &mockSystemd{available: true}
+	cfg := &config.Config{
+		Sync: config.SyncConfig{Restart: config.RestartAllManaged},
+	}
+	engine := &Engine{cfg: cfg, systemd: ms, logger: testLogger()}
+	plan := &Plan{}
+	state := &State{
+		ManagedFiles: map[string]ManagedFile{
+			"/quadlet/app.env": {SourcePath: "app.env", Hash: "abc"},
+		},
+	}
+	err := engine.handleRestarts(context.Background(), plan, state)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if ms.restartCalled {
+		t.Error("TryRestartUnits should not be called when there are no quadlet files")
+	}
+}
+
+func TestRun_WithCorruptedState(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	// Write corrupted state file
+	stateFile := filepath.Join(stateDir, "state.json")
+	if err := os.WriteFile(stateFile, []byte("{corrupted"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(stateDir, "repo")
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			_ = os.MkdirAll(destDir, 0755)
+			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+		},
+	}
+	ms := &mockSystemd{available: true}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	// Create repo dir so git mock can use it
+	_ = os.MkdirAll(repoDir, 0755)
+	err := engine.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run should recover from corrupted state, got error: %v", err)
+	}
+}
+
+func TestRun_HandleRestartsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+	}
+	repoDir := filepath.Join(stateDir, "repo")
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			_ = os.MkdirAll(destDir, 0755)
+			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+		},
+	}
+	ms := &mockSystemd{available: true, restartErr: fmt.Errorf("restart failed")}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	_ = os.MkdirAll(repoDir, 0755)
+	err := engine.Run(context.Background())
+	if err != nil {
+		t.Errorf("Run should not fail due to restart error, got: %v", err)
 	}
 }
