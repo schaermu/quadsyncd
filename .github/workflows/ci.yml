@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -130,11 +130,21 @@ jobs:
               });
             }
 
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Integration Tests (Tier 1)
         run: go test -tags=integration ./integration/tier1 -v
 
   update-badge:
-    needs: test
+    needs: [lint, vuln-check, test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -162,7 +172,7 @@ jobs:
           git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push)
 
   build:
-    needs: [lint, vuln-check, test]
+    needs: [lint, vuln-check, test, integration-test]
     strategy:
       fail-fast: false
       matrix:
