@@ -942,3 +942,98 @@ func TestRun_HandleRestartsError(t *testing.T) {
 		t.Errorf("Run should not fail due to restart error, got: %v", err)
 	}
 }
+
+func TestRun_DaemonReloadError(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	repoDir := filepath.Join(stateDir, "repo")
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			_ = os.MkdirAll(destDir, 0755)
+			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+		},
+	}
+	ms := &mockSystemd{available: true, reloadErr: fmt.Errorf("daemon-reload failed")}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	_ = os.MkdirAll(repoDir, 0755)
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Error("expected error when DaemonReload fails, got nil")
+	}
+}
+
+func TestRun_BuildPlanError(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main", Subdir: "nonexistent-subdir"},
+		Paths: config.PathsConfig{QuadletDir: filepath.Join(tmpDir, "quadlet"), StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			// Create repo dir but NOT the subdir, so DiscoverAllFiles will fail
+			_ = os.MkdirAll(destDir, 0755)
+		},
+	}
+	ms := &mockSystemd{available: true}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Error("expected error when buildPlan fails, got nil")
+	}
+}
+
+func TestRun_SaveStateError(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Use a non-writable path for state to trigger saveState error
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	repoDir := filepath.Join(stateDir, "repo")
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			_ = os.MkdirAll(destDir, 0755)
+			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+		},
+	}
+	ms := &mockSystemd{available: true}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	_ = os.MkdirAll(repoDir, 0755)
+	// Make state dir read-only after setup to trigger saveState error
+	_ = os.Chmod(stateDir, 0555)
+	defer func() { _ = os.Chmod(stateDir, 0755) }()
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Error("expected error when saveState fails, got nil")
+	}
+}
+
+func TestFileHash_NonExistentFile(t *testing.T) {
+	_, err := fileHash("/nonexistent/file.txt")
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
+	}
+}

@@ -114,6 +114,9 @@ func TestValidate(t *testing.T) {
 				Auth: AuthConfig{
 					SSHKeyFile: "/key",
 				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
 			},
 			wantErr: true,
 		},
@@ -149,6 +152,9 @@ func TestValidate(t *testing.T) {
 					SSHKeyFile:     "/key",
 					HTTPSTokenFile: "/token",
 				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
 			},
 			wantErr: true,
 		},
@@ -166,6 +172,9 @@ func TestValidate(t *testing.T) {
 				Auth: AuthConfig{
 					SSHKeyFile: "/key",
 				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
 			},
 			wantErr: true,
 		},
@@ -182,6 +191,28 @@ func TestValidate(t *testing.T) {
 				},
 				Auth: AuthConfig{
 					HTTPSTokenFile: "/token",
+				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "missing quadlet_dir",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL: "git@github.com:test/repo.git",
+					Ref: "main",
+				},
+				Paths: PathsConfig{
+					StateDir: "/absolute/state",
+				},
+				Auth: AuthConfig{
+					SSHKeyFile: "/key",
+				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
 				},
 			},
 			wantErr: true,
@@ -215,6 +246,9 @@ func TestValidate(t *testing.T) {
 				Auth: AuthConfig{
 					SSHKeyFile: "/key",
 				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
+				},
 			},
 			wantErr: true,
 		},
@@ -231,6 +265,9 @@ func TestValidate(t *testing.T) {
 				},
 				Auth: AuthConfig{
 					SSHKeyFile: "/key",
+				},
+				Sync: SyncConfig{
+					Restart: RestartChanged,
 				},
 			},
 			wantErr: true,
@@ -526,5 +563,38 @@ func TestExpandEnv(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("expandEnv() %s = %s, want %s", c.name, c.got, c.want)
 		}
+	}
+}
+
+func TestLoad_NonExistentFile(t *testing.T) {
+	_, err := Load("/nonexistent/config.yaml")
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
+	}
+}
+
+func TestLoad_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "bad.yaml")
+	if err := os.WriteFile(path, []byte("not: [valid: yaml: {{"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for invalid YAML, got nil")
+	}
+}
+
+func TestLoad_ValidationFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "invalid.yaml")
+	// Valid YAML but fails validation (missing required fields)
+	content := "repo:\n  url: \"\"\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for invalid config, got nil")
 	}
 }
