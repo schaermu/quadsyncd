@@ -105,11 +105,8 @@ func IsRestartableQuadlet(path string) bool {
 	switch ext {
 	case ".container", ".kube", ".pod":
 		return true
-	case ".volume", ".network", ".image", ".build":
-		return false
-	default:
-		return false
 	}
+	return false
 }
 
 // RelativePath returns the relative path from baseDir to target
