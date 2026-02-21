@@ -1006,7 +1006,6 @@ func TestRun_BuildPlanError(t *testing.T) {
 
 func TestRun_SaveStateError(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Use a non-writable path for state to trigger saveState error
 	stateDir := filepath.Join(tmpDir, "state")
 	quadletDir := filepath.Join(tmpDir, "quadlet")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
@@ -1028,9 +1027,13 @@ func TestRun_SaveStateError(t *testing.T) {
 	ms := &mockSystemd{available: true}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
 	_ = os.MkdirAll(repoDir, 0755)
-	// Make state dir read-only after setup to trigger saveState error
-	_ = os.Chmod(stateDir, 0555)
-	defer func() { _ = os.Chmod(stateDir, 0755) }()
+	// Point the state file at a path whose parent is a regular file, not a
+	// directory. This deterministically prevents writing regardless of the
+	// user's privileges (including root), unlike a read-only chmod approach.
+	blocker := filepath.Join(stateDir, "state.json")
+	if err := os.MkdirAll(blocker, 0755); err != nil {
+		t.Fatal(err)
+	}
 	err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when saveState fails, got nil")

@@ -221,7 +221,7 @@ func TestConfigureAuth_SSH(t *testing.T) {
 
 func TestConfigureAuth_HTTPS(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte("ghp_testtoken123\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("example-token-value\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,8 +240,8 @@ func TestConfigureAuth_HTTPS(t *testing.T) {
 	if !ok {
 		t.Fatal("expected QUADSYNCD_GIT_TOKEN in env")
 	}
-	if tokenVal != "ghp_testtoken123" {
-		t.Errorf("QUADSYNCD_GIT_TOKEN = %q, want %q", tokenVal, "ghp_testtoken123")
+	if tokenVal != "example-token-value" {
+		t.Errorf("QUADSYNCD_GIT_TOKEN = %q, want %q", tokenVal, "example-token-value")
 	}
 
 	// Verify git flags were inserted: cmd.Args should contain "-c" and a credential.helper value.
@@ -305,7 +305,7 @@ func TestConfigureAuth_SSHWithHTTPSURL(t *testing.T) {
 
 func TestConfigureAuth_HTTPSWithSSHURL(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte("ghp_testtoken123\n"), 0600); err != nil {
+	if err := os.WriteFile(tokenFile, []byte("example-token-value\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
