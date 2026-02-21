@@ -25,10 +25,10 @@ All checks must pass before proceeding.
 quadsyncd uses semantic versioning with a `v` prefix. Tag format: `v<major>.<minor>.<patch>`
 
 Examples:
-- `v0.1.0` - Initial release
-- `v0.2.0` - New features (minor bump)
-- `v0.2.1` - Bug fixes (patch bump)
-- `v1.0.0` - First stable release (major bump)
+- `v0.1.0` — Initial release
+- `v0.2.0` — New features (minor bump)
+- `v0.2.1` — Bug fixes (patch bump)
+- `v1.0.0` — First stable release (major bump)
 
 ### Create and Push Tag
 
@@ -108,7 +108,7 @@ The changelog is auto-generated from commit messages (see `.goreleaser.yaml`). C
 - `chore`: Maintenance
 - `ci`: CI changes
 
-This is why following Conventional Commits is critical (see `CONTRIBUTING.md`).
+This is why following [Conventional Commits](https://www.conventionalcommits.org/) is critical.
 
 ## Troubleshooting
 
@@ -155,12 +155,4 @@ This information is displayed via `quadsyncd version`.
 - [ ] GitHub Release created with all artifacts
 - [ ] Changelog is reasonable
 - [ ] One artifact manually tested
-- [ ] Update documentation if needed (README, deployment guides)
-
-## Source of Truth
-
-This document provides narrative guidance. For authoritative configuration, always refer to:
-
-- `.github/workflows/release.yml` - Release workflow definition
-- `.goreleaser.yaml` - Build and archive configuration
-- `Makefile` - Local build targets
+- [ ] Update documentation if needed

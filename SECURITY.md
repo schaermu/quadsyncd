@@ -53,17 +53,17 @@ When using HTTPS tokens:
 - Limit token to specific repositories
 - Set expiration dates and rotate before expiry
 
-### Webhook Security (Future)
+### Webhook Security
 
-When webhook mode is implemented, security measures will include:
+Webhook mode (`quadsyncd serve`) includes the following security measures:
 
 - HMAC-SHA256 signature verification (`X-Hub-Signature-256`)
 - Localhost-only binding (`127.0.0.1`) with reverse proxy/tunnel
 - Ref filtering (only allowed branches trigger syncs)
 - Request size limits and timeouts
-- Rate limiting and debouncing
+- Debouncing and single-flight execution
 
-See `docs/webhook-reverse-proxy.md` for planned architecture.
+See the [Webhook Setup](https://github.com/schaermu/quadsyncd/wiki/Webhook-Setup) wiki page for deployment architecture.
 
 ### Supply Chain Security
 
