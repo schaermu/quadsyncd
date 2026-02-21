@@ -105,54 +105,24 @@ jobs:
       - name: Integration Tests (Tier 1)
         run: go test -tags=integration ./integration/tier1 -v
 
-      - name: Generate coverage badge
+      - name: Update coverage badge data
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           COVERAGE_TOTAL: ${{ steps.coverage.outputs.total }}
         run: |
-          mkdir -p .github/badges
-          python3 << 'PYEOF'
-          import os
-          pct = float(os.environ.get('COVERAGE_TOTAL', '0%').rstrip('%'))
-          color = '#4c1' if pct >= 80 else ('#dfb317' if pct >= 60 else '#e05d44')
-          label = 'coverage'
-          value = f'{pct:.1f}%'
-          lw = 68
-          vw = max(38, len(value) * 7 + 12)
-          tw = lw + vw
-          lx = lw // 2
-          vx = lw + vw // 2
-          svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{tw}" height="20" role="img" aria-label="{label}: {value}">
-            <title>{label}: {value}</title>
-            <linearGradient id="s" x2="0" y2="100%">
-              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
-              <stop offset="1" stop-opacity=".1"/>
-            </linearGradient>
-            <clipPath id="r">
-              <rect width="{tw}" height="20" rx="3" fill="#fff"/>
-            </clipPath>
-            <g clip-path="url(#r)">
-              <rect width="{lw}" height="20" fill="#555"/>
-              <rect x="{lw}" width="{vw}" height="20" fill="{color}"/>
-              <rect width="{tw}" height="20" fill="url(#s)"/>
-            </g>
-            <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
-              <text x="{lx}" y="15" fill="#010101" fill-opacity=".3">{label}</text>
-              <text x="{lx}" y="14">{label}</text>
-              <text x="{vx}" y="15" fill="#010101" fill-opacity=".3">{value}</text>
-              <text x="{vx}" y="14">{value}</text>
-            </g>
-          </svg>"""
-          with open('.github/badges/coverage.svg', 'w') as f:
-              f.write(svg)
-          PYEOF
+          PCT="${COVERAGE_TOTAL%\%}"
+          if awk "BEGIN{exit !($PCT >= 80)}"; then COLOR="brightgreen"
+          elif awk "BEGIN{exit !($PCT >= 60)}"; then COLOR="yellow"
+          else COLOR="red"; fi
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s","color":"%s"}\n' \
+            "$COVERAGE_TOTAL" "$COLOR" > .github/badges/coverage.json
 
-      - name: Commit coverage badge
+      - name: Commit coverage badge data
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .github/badges/coverage.svg
+          git add .github/badges/coverage.json
           git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push)
 
   build:
