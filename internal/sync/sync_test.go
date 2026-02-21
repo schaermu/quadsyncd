@@ -56,7 +56,7 @@ func (m *mockSystemd) TryRestartUnits(_ context.Context, units []string) error {
 	return m.restartErr
 }
 
-func (m *mockSystemd) ValidateQuadlets(_ context.Context) error {
+func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
 	m.validateCalled = true
 	return m.validateErr
 }
@@ -1069,8 +1069,12 @@ func TestRun_ValidateQuadletsError(t *testing.T) {
 	mg := &mockGitClient{
 		commitHash: "abc123",
 		repoSetup: func(destDir string) {
-			_ = os.MkdirAll(destDir, 0755)
-			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				t.Fatalf("repoSetup: MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
+				t.Fatalf("repoSetup: WriteFile: %v", err)
+			}
 		},
 	}
 	ms := &mockSystemd{available: true, validateErr: fmt.Errorf("invalid quadlet syntax")}
@@ -1085,6 +1089,10 @@ func TestRun_ValidateQuadletsError(t *testing.T) {
 	// Sync should fail before daemon-reload when validation fails
 	if ms.reloadCalled {
 		t.Error("DaemonReload should not be called when validation fails")
+	}
+	// State must not be saved on validation failure
+	if _, err := os.Stat(cfg.StateFilePath()); !os.IsNotExist(err) {
+		t.Error("state file should not be saved when validation fails")
 	}
 }
 
@@ -1103,8 +1111,12 @@ func TestRun_ValidateQuadletsCalled(t *testing.T) {
 	mg := &mockGitClient{
 		commitHash: "abc123",
 		repoSetup: func(destDir string) {
-			_ = os.MkdirAll(destDir, 0755)
-			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				t.Fatalf("repoSetup: MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
+				t.Fatalf("repoSetup: WriteFile: %v", err)
+			}
 		},
 	}
 	ms := &mockSystemd{available: true}

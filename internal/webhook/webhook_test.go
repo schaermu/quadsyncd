@@ -59,7 +59,7 @@ func (m *mockSystemd) TryRestartUnits(ctx context.Context, units []string) error
 	return nil
 }
 
-func (m *mockSystemd) ValidateQuadlets(_ context.Context) error {
+func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
 	if m.shouldFail {
 		return http.ErrServerClosed
 	}

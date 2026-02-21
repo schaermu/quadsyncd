@@ -95,9 +95,8 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	// Validate quadlet definitions
-	e.logger.Info("validating quadlet definitions")
-	if err := e.systemd.ValidateQuadlets(ctx); err != nil {
-		e.logger.Error("quadlet validation failed", "error", err)
+	e.logger.Info("validating quadlet definitions", "quadlet_dir", e.cfg.Paths.QuadletDir)
+	if err := e.systemd.ValidateQuadlets(ctx, e.cfg.Paths.QuadletDir); err != nil {
 		return fmt.Errorf("failed to validate quadlet definitions: %w", err)
 	}
 

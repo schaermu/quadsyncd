@@ -19,7 +19,8 @@ type Systemd interface {
 	IsAvailable(ctx context.Context) (bool, error)
 	// ValidateQuadlets runs the podman quadlet generator in dry-run mode to
 	// validate that the quadlet files can be converted into systemd units.
-	ValidateQuadlets(ctx context.Context) error
+	// quadletDir is the directory containing the quadlet files to validate.
+	ValidateQuadlets(ctx context.Context, quadletDir string) error
 }
 
 // Client implements Systemd by shelling out to systemctl --user
@@ -78,22 +79,36 @@ func (c *Client) IsAvailable(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// podmanSystemGenerator is the path to the Podman quadlet system generator binary.
-const podmanSystemGenerator = "/usr/lib/systemd/system-generators/podman-system-generator"
+// podmanSystemGeneratorFallback is the traditional hard-coded path for the
+// Podman quadlet system generator binary.
+const podmanSystemGeneratorFallback = "/usr/lib/systemd/system-generators/podman-system-generator"
+
+// quadletGeneratorPath resolves the podman quadlet generator binary path.
+// It prefers resolving via PATH and falls back to the traditional systemd
+// generator location to preserve existing behavior.
+func (c *Client) quadletGeneratorPath() string {
+	if path, err := exec.LookPath("podman-system-generator"); err == nil {
+		return path
+	}
+	return podmanSystemGeneratorFallback
+}
 
 // ValidateQuadlets runs the podman quadlet generator in dry-run mode to
-// validate that the quadlet files can be converted into systemd units.
-// If the generator binary is not present, validation is skipped with a warning.
-// It reports any generator errors in the returned error.
-func (c *Client) ValidateQuadlets(ctx context.Context) error {
-	if _, err := os.Stat(podmanSystemGenerator); err != nil {
-		slog.Warn("podman-system-generator not found, skipping quadlet validation", "path", podmanSystemGenerator)
+// validate that the quadlet files in quadletDir can be converted into systemd
+// units. If the generator binary is not present, validation is skipped with a
+// warning. It reports any generator errors in the returned error.
+func (c *Client) ValidateQuadlets(ctx context.Context, quadletDir string) error {
+	generatorPath := c.quadletGeneratorPath()
+	if _, err := os.Stat(generatorPath); err != nil {
+		slog.Warn("podman-system-generator not found, skipping quadlet validation",
+			"path", generatorPath,
+			"quadlet_dir", quadletDir)
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, podmanSystemGenerator, "--user", "--dryrun")
+	cmd := exec.CommandContext(ctx, generatorPath, "--user", "--dryrun")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("podman-system-generator --dryrun: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("podman-system-generator --dryrun (path %s): %w: %s", generatorPath, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
