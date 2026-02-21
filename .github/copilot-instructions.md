@@ -46,7 +46,7 @@ go mod tidy && git diff --exit-code && make fmt && make lint && make test && mak
   - `none` → reload only
   - `changed` → `try-restart` units whose quadlet changed
   - `all-managed` → `try-restart` every managed unit
-- **Webhook (future):** bind `127.0.0.1` only; verify HMAC-SHA256 signature before
+- **Webhook:** bind `127.0.0.1` only; verify HMAC-SHA256 signature before
   any processing; reject unsigned/invalid requests with HTTP 403.
 
 ## Reusable prompts

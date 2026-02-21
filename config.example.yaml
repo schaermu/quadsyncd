@@ -35,7 +35,7 @@ auth:
   # OR: Path to file containing GitHub personal access token for HTTPS
   # https_token_file: "${HOME}/.config/quadsyncd/github_token"
 
-# Webhook server configuration (optional; for future daemon mode)
+# Webhook server configuration (optional; for `quadsyncd serve` daemon mode)
 serve:
   # Enable webhook listener
   enabled: false

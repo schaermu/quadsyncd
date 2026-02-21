@@ -205,7 +205,7 @@ Log levels: debug, info, warn, error (configurable via `--log-level`).
 
 ## Questions?
 
-- Check existing documentation in `docs/` directory
+- Check the [wiki](https://github.com/schaermu/quadsyncd/wiki) for documentation
 - Review existing code and tests for patterns
 - Open a GitHub issue for bugs or feature requests
 - See `AGENTS.md` if you're an AI coding agent (different audience)

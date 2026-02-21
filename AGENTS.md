@@ -19,7 +19,7 @@ If this document conflicts with README/docs/workflows:
 
 **Current mode:** Timer-based oneshot sync (systemd timer → fetch repo → reconcile → reload systemd).
 
-**Planned mode:** Webhook daemon (long-running HTTP server responding to GitHub webhooks).
+**Webhook mode:** Long-running HTTP server responding to GitHub webhooks (`quadsyncd serve`).
 
 ## Non-Negotiables
 
@@ -152,15 +152,15 @@ Run `make fmt` as needed.
 ### Source of truth for procedures
 
 - **CI checks:** See `.github/workflows/ci.yml` (never restate steps in docs)
-- **Release process:** See `docs/releasing.md` and `.github/workflows/release.yml`
+- **Release process:** See the [wiki](https://github.com/schaermu/quadsyncd/wiki/Release-Process) and `.github/workflows/release.yml`
 - **Build targets:** See `Makefile`
-- **Deployment:** See `docs/deployment-rootless-systemd.md`
+- **Deployment:** See the [wiki](https://github.com/schaermu/quadsyncd/wiki/Deployment-Guide)
 
 Do not duplicate CI/build steps in agent instructions. Always refer to authoritative sources.
 
-## Future Work: Webhook Daemon
+## Webhook Daemon
 
-When implementing `quadsyncd serve`:
+The `quadsyncd serve` command runs the webhook daemon:
 
 ### Design Requirements
 
@@ -234,10 +234,10 @@ cat ~/.local/state/quadsyncd/state.json
 
 **NOT in AGENTS.md (belongs in human docs):**
 - Detailed "how to develop" guides → `CONTRIBUTING.md`
-- Deployment instructions → `docs/deployment-rootless-systemd.md`
-- Release procedures → `docs/releasing.md`
+- Deployment instructions → [wiki](https://github.com/schaermu/quadsyncd/wiki/Deployment-Guide)
+- Release procedures → [wiki](https://github.com/schaermu/quadsyncd/wiki/Release-Process)
 - CI/CD step-by-step → `.github/workflows/ci.yml`
-- User-facing troubleshooting → `README.md` or `docs/*`
+- User-facing troubleshooting → `README.md` or the [wiki](https://github.com/schaermu/quadsyncd/wiki)
 
 ## Summary
 
@@ -248,4 +248,4 @@ When working on this codebase:
 3. **Testing:** No network in unit tests; isolate side effects behind interfaces
 4. **Logging:** Use `slog` with structured key/value pairs
 5. **Truth:** Workflows and Makefile are authoritative; never duplicate their steps
-6. **Webhook:** Future work; must verify signatures, bind localhost, debounce, reuse sync engine
+6. **Webhook:** Verify signatures, bind localhost, debounce, reuse sync engine

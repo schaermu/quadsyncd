@@ -197,8 +197,8 @@ Nightly/manual integration tests that run quadsyncd in a close-to-real environme
 - `.github/workflows/e2e-runtime.yml` (separate; workflow_dispatch only initially; can be stubbed or added when runtime tests exist)
 
 ### Docs
-- `docs/integration-tests.md`
-- Optional: small pointer added to `CONTRIBUTING.md` that links to `docs/integration-tests.md` (no CI step restatement; link to workflows)
+- [wiki: Integration Tests](https://github.com/schaermu/quadsyncd/wiki/Integration-Tests)
+- Optional: small pointer added to `CONTRIBUTING.md` that links to the wiki (no CI step restatement; link to workflows)
 
 ---
 
@@ -468,7 +468,7 @@ Collect best-effort outputs into files (host-side temp dir) and upload on failur
 
 ## Documentation Plan
 
-### Create `docs/integration-tests.md`
+### Create wiki page: Integration Tests
 - Explain Tier 1 vs Tier 2
 - Explain Tier 2 split: discovery vs runtime workflows (and why)
 - How to run locally:
@@ -481,7 +481,7 @@ Collect best-effort outputs into files (host-side temp dir) and upload on failur
 - Link to `.github/workflows/e2e-discovery.yml` and `.github/workflows/e2e-runtime.yml`
 
 ### Optional: Update `CONTRIBUTING.md`
-Add a short pointer to `docs/integration-tests.md` (no CI step restatement; link to workflows).
+Add a short pointer to the [Integration Tests wiki page](https://github.com/schaermu/quadsyncd/wiki/Integration-Tests) (no CI step restatement; link to workflows).
 
 ---
 
@@ -492,7 +492,7 @@ Add a short pointer to `docs/integration-tests.md` (no CI step restatement; link
 3. **Implement Scenario A only**; stabilize locally
 4. **Add update and prune scenarios**
 5. **Add `e2e-discovery.yml` workflow** and validate artifact upload on a forced failure
-6. **Add `docs/integration-tests.md`** (+ optional `CONTRIBUTING.md` pointer)
+6. **Add wiki page: Integration Tests** (+ optional `CONTRIBUTING.md` pointer)
 7. **Start runtime work** in parallel later under separate workflow/tag
 
 ---

@@ -38,21 +38,16 @@ INTEGRATION_KEEP_CONTAINER=1 go test -tags=integration ./integration/tier1 -v
 
 Tier 1 includes these scenarios:
 
-- **A) Initial sync with restart:none** - Validates daemon-reload only, no unit restarts
-- **B) Initial sync with restart:changed** - Validates daemon-reload + try-restart of new units
-- **C) Update sync with restart:changed** - Validates detection of changes and restart
-- **D) No-op sync** - Validates no operations when nothing changed
-- **E) Prune removes file** - Validates deletion of removed quadlets
-- **F) Dry-run mode** - Validates no side effects in dry-run
+- **A) Initial sync with restart:none** — Validates daemon-reload only, no unit restarts
+- **B) Initial sync with restart:changed** — Validates daemon-reload + try-restart of new units
+- **C) Update sync with restart:changed** — Validates detection of changes and restart
+- **D) No-op sync** — Validates no operations when nothing changed
+- **E) Prune removes file** — Validates deletion of removed quadlets
+- **F) Dry-run mode** — Validates no side effects in dry-run
 
 ### CI Integration
 
-Tier 1 tests run on every PR via `.github/workflows/ci.yml`:
-
-```yaml
-- name: Integration Tests (Tier 1)
-  run: go test -tags=integration ./integration/tier1 -v
-```
+Tier 1 tests run on every PR via `.github/workflows/ci.yml`.
 
 ## Tier 2: Discovery E2E Tests
 
@@ -90,9 +85,9 @@ E2E_TIMEOUT=15m go test -tags=e2e_discovery ./e2e -v
 
 Tier 2 discovery includes:
 
-- **A) Initial sync generates unit** - Validates quadlet files and systemd unit generation
-- **B) Update keeps unit** - Validates updates preserve unit functionality
-- **C) Prune removes unit** - Validates deletion removes generated units
+- **A) Initial sync generates unit** — Validates quadlet files and systemd unit generation
+- **B) Update keeps unit** — Validates updates preserve unit functionality
+- **C) Prune removes unit** — Validates deletion removes generated units
 
 ### Readiness Probe
 
@@ -164,72 +159,41 @@ journalctl --user -n 100
 docker stop <container-id>
 ```
 
-## Troubleshooting
+## Common Issues
 
-### Tier 1: Common Issues
-
-**Problem:** Container fails to start
+### Container fails to start
 - Check Docker is running
 - Ensure image built successfully: `docker images | grep quadsyncd-tier1-sut`
 
-**Problem:** Git operations fail
+### Git operations fail
 - Check repo initialization in test output
 - Verify git is installed in container
 
-**Problem:** Systemctl shim not recording
-- Check `/tmp/systemctl.log` in container
-- Verify shim is in PATH before real systemctl
-
-### Tier 2: Common Issues
-
-**Problem:** `systemctl --user status` fails in readiness probe
+### `systemctl --user status` fails in readiness probe
 - Check `user@1000.service` is running: `systemctl status user@1000.service`
 - Verify `/run/user/1000` exists and has correct ownership (1000:1000)
 - Check for dbus issues: `ls -la /run/user/1000/bus`
 - Review user journal: `journalctl --user -n 100`
 
-**Problem:** Quadlet generator doesn't run
+### Quadlet generator doesn't run
 - Verify podman is installed: `podman --version`
 - Check quadlet file location: `ls -la ~/.config/containers/systemd`
 - Run `systemctl --user daemon-reload` manually
 - Check generator logs in user journal
 
-**Problem:** Container boots slowly or times out
+### Container boots slowly or times out
 - Increase timeout: `E2E_TIMEOUT=20m go test ...`
 - Check systemd is reaching "running" state
 - Review systemd journal for errors
 
-**Problem:** Test fails but container removed
-- Use `E2E_KEEP_CONTAINER=1` to preserve container
-- Check workflow artifact uploads for diagnostics
-
-### Getting Help
-
-For persistent issues:
-
-1. Run with `E2E_KEEP_CONTAINER=1` or `INTEGRATION_KEEP_CONTAINER=1`
-2. Collect diagnostics manually
-3. Check the GitHub workflow runs for artifact uploads
-4. Review systemd and journal logs for root cause
-
-## Future: Runtime Tests
-
-Tier 2 will eventually include runtime tests (separate workflow) that:
-
-- Start units with `systemctl --user start`
-- Validate containers are running with `podman ps`
-- Test image pull strategies
-
-These will run in a separate workflow (`.github/workflows/e2e-runtime.yml`) to keep discovery signal clean.
-
 ## Design Principles
 
-1. **One container per suite** - Fewer systemd boots, more stable, faster
-2. **Fail fast on readiness** - Don't run scenarios if systemctl doesn't work
-3. **Always collect diagnostics** - Capture full state on any failure
-4. **Separate discovery from runtime** - Keep nightly signal stable
-5. **No external dependencies** - Use local git repos in tests
-6. **Centralize docker operations** - Keep test code clean and focused
+1. **One container per suite** — Fewer systemd boots, more stable, faster
+2. **Fail fast on readiness** — Don't run scenarios if systemctl doesn't work
+3. **Always collect diagnostics** — Capture full state on any failure
+4. **Separate discovery from runtime** — Keep nightly signal stable
+5. **No external dependencies** — Use local git repos in tests
+6. **Centralize docker operations** — Keep test code clean and focused
 
 ## References
 
