@@ -186,13 +186,13 @@ func TestUnitNameFromQuadlet(t *testing.T) {
 		want  string
 	}{
 		{"myapp.container", "myapp.service"},
-		{"db.volume", "db.service"},
-		{"net.network", "net.service"},
+		{"db.volume", "db-volume.service"},
+		{"net.network", "net-network.service"},
 		{"app.kube", "app.service"},
-		{"base.image", "base.service"},
-		{"ci.build", "ci.service"},
+		{"base.image", "base-image.service"},
+		{"ci.build", "ci-build.service"},
 		{"group.pod", "group.service"},
-		{"/path/to/db.volume", "db.service"},
+		{"/path/to/db.volume", "db-volume.service"},
 		{"/deep/nested/path/myapp.container", "myapp.service"},
 	}
 
