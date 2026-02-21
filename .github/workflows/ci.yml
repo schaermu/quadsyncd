@@ -169,7 +169,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add .github/badges/coverage.json
-          git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push)
+          git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push origin HEAD:refs/heads/badges --force)
 
   build:
     needs: [lint, vuln-check, test, integration-test]
