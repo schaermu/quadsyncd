@@ -5,7 +5,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'wiki/**'
+      - wiki/**
+      - .github/workflows/publish-wiki.yml
 
 concurrency:
   group: publish-wiki
@@ -15,25 +16,8 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  publish-wiki:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Checkout wiki repository
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ github.repository }}.wiki
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: wiki-repo
-
-      - name: Publish wiki
-        run: |
-          rsync -av --delete wiki/ wiki-repo/
-          cd wiki-repo
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          git diff --staged --quiet || git commit -m 'docs: sync wiki from main'
-          git push
+      - uses: actions/checkout@v3
+      - uses: Andrew-Chen-Wang/github-wiki-action@v4
