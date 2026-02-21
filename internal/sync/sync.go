@@ -94,6 +94,13 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to apply sync plan: %w", err)
 	}
 
+	// Validate quadlet definitions
+	e.logger.Info("validating quadlet definitions")
+	if err := e.systemd.ValidateQuadlets(ctx); err != nil {
+		e.logger.Error("quadlet validation failed", "error", err)
+		return fmt.Errorf("failed to validate quadlet definitions: %w", err)
+	}
+
 	// Save new state
 	newState := e.buildState(prevState, plan, commit)
 	if err := e.saveState(newState); err != nil {

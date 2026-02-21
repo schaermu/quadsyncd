@@ -15,6 +15,9 @@ type Systemd interface {
 	TryRestartUnits(ctx context.Context, units []string) error
 	// IsAvailable checks if systemctl --user is accessible
 	IsAvailable(ctx context.Context) (bool, error)
+	// ValidateQuadlets runs the podman quadlet generator in dry-run mode to
+	// validate that the quadlet files can be converted into systemd units.
+	ValidateQuadlets(ctx context.Context) error
 }
 
 // Client implements Systemd by shelling out to systemctl --user
@@ -71,6 +74,18 @@ func (c *Client) IsAvailable(ctx context.Context) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// ValidateQuadlets runs the podman quadlet generator in dry-run mode to
+// validate that the quadlet files can be converted into systemd units.
+// It reports any generator errors in the returned error.
+func (c *Client) ValidateQuadlets(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "/usr/lib/systemd/system-generators/podman-system-generator", "--user", "--dryrun")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman-system-generator --dryrun: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 // RestartUnits restarts the specified units (harder than try-restart)
