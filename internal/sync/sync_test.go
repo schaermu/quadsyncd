@@ -879,7 +879,9 @@ func TestHandleRestarts_AllManagedNoQuadletFiles(t *testing.T) {
 	}
 }
 
-func TestRun_WithCorruptedState(t *testing.T) {
+// TestRun_RecoversFromCorruptedState verifies that the sync engine treats a
+// corrupted state file as a fresh sync rather than a fatal error.
+func TestRun_RecoversFromCorruptedState(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDir := filepath.Join(tmpDir, "state")
 	quadletDir := filepath.Join(tmpDir, "quadlet")
@@ -914,6 +916,10 @@ func TestRun_WithCorruptedState(t *testing.T) {
 	}
 }
 
+// TestRun_HandleRestartsError verifies that restart failures are treated as
+// non-fatal warnings (the sync still succeeds). This is by design: the files
+// have already been synced and the daemon reloaded, so a restart failure should
+// not roll back or report the entire sync as failed.
 func TestRun_HandleRestartsError(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDir := filepath.Join(tmpDir, "state")
