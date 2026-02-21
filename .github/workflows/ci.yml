@@ -4,15 +4,18 @@ on:
   push:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-    outputs:
-      coverage-total: ${{ steps.coverage.outputs.total }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -24,12 +27,35 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code
-      - name: Govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Lint
         run: |
           go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
+
+  vuln-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      coverage-total: ${{ steps.coverage.outputs.total }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Test
         run: go test -v -race -coverprofile=coverage.txt ./...
@@ -104,13 +130,24 @@ jobs:
               });
             }
 
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Integration Tests (Tier 1)
         run: go test -tags=integration ./integration/tier1 -v
 
   update-badge:
-    needs: test
+    needs: [lint, vuln-check, test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
@@ -135,6 +172,7 @@ jobs:
           git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push)
 
   build:
+    needs: [lint, vuln-check, test, integration-test]
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +182,7 @@ jobs:
           - goos: darwin
             goarch: amd64
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
