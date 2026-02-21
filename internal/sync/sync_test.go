@@ -34,8 +34,10 @@ type mockSystemd struct {
 	availableErr   error
 	reloadErr      error
 	restartErr     error
+	validateErr    error
 	reloadCalled   bool
 	restartCalled  bool
+	validateCalled bool
 	restartedUnits []string
 }
 
@@ -52,6 +54,11 @@ func (m *mockSystemd) TryRestartUnits(_ context.Context, units []string) error {
 	m.restartCalled = true
 	m.restartedUnits = units
 	return m.restartErr
+}
+
+func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
+	m.validateCalled = true
+	return m.validateErr
 }
 
 func testLogger() *slog.Logger {
@@ -1044,5 +1051,83 @@ func TestFileHash_NonExistentFile(t *testing.T) {
 	_, err := fileHash("/nonexistent/file.txt")
 	if err == nil {
 		t.Error("expected error for non-existent file, got nil")
+	}
+}
+
+func TestRun_ValidateQuadletsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				t.Fatalf("repoSetup: MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
+				t.Fatalf("repoSetup: WriteFile: %v", err)
+			}
+		},
+	}
+	ms := &mockSystemd{available: true, validateErr: fmt.Errorf("invalid quadlet syntax")}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when ValidateQuadlets fails, got nil")
+	}
+	if !ms.validateCalled {
+		t.Error("ValidateQuadlets should have been called")
+	}
+	// Sync should fail before daemon-reload when validation fails
+	if ms.reloadCalled {
+		t.Error("DaemonReload should not be called when validation fails")
+	}
+	// State must not be saved on validation failure
+	if _, err := os.Stat(cfg.StateFilePath()); !os.IsNotExist(err) {
+		t.Error("state file should not be saved when validation fails")
+	}
+}
+
+func TestRun_ValidateQuadletsCalled(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateDir := filepath.Join(tmpDir, "state")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(stateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Repo:  config.RepoConfig{URL: "file:///test", Ref: "main"},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+	mg := &mockGitClient{
+		commitHash: "abc123",
+		repoSetup: func(destDir string) {
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				t.Fatalf("repoSetup: MkdirAll: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
+				t.Fatalf("repoSetup: WriteFile: %v", err)
+			}
+		},
+	}
+	ms := &mockSystemd{available: true}
+	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !ms.validateCalled {
+		t.Error("ValidateQuadlets should be called during a full sync")
+	}
+	if !ms.reloadCalled {
+		t.Error("DaemonReload should be called after successful validation")
 	}
 }
