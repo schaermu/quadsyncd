@@ -162,7 +162,7 @@ jobs:
           git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push)
 
   build:
-    needs: [lint, test]
+    needs: [lint, vuln-check, test]
     strategy:
       fail-fast: false
       matrix:
