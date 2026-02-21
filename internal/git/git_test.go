@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -177,5 +178,148 @@ func TestInsertGitFlags(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// envContains reports whether the env slice contains a variable with the given prefix.
+func envContains(env []string, prefix string) bool {
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// envValue returns the value portion of a "KEY=VALUE" entry matching the given key.
+func envValue(env []string, key string) (string, bool) {
+	prefix := key + "="
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return e[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
+func TestConfigureAuth_SSH(t *testing.T) {
+	client := &ShellClient{sshKeyFile: "/tmp/test-key"}
+	cmd := exec.Command("git", "clone", "git@github.com:user/repo.git", "/dest")
+
+	if err := client.configureAuth(cmd, "git@github.com:user/repo.git"); err != nil {
+		t.Fatalf("configureAuth() error = %v", err)
+	}
+
+	val, ok := envValue(cmd.Env, "GIT_SSH_COMMAND")
+	if !ok {
+		t.Fatal("expected GIT_SSH_COMMAND to be set")
+	}
+	if !strings.Contains(val, "/tmp/test-key") {
+		t.Errorf("GIT_SSH_COMMAND = %q, want it to contain key path", val)
+	}
+}
+
+func TestConfigureAuth_HTTPS(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("ghp_testtoken123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &ShellClient{httpsTokenFile: tokenFile}
+	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
+
+	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
+		t.Fatalf("configureAuth() error = %v", err)
+	}
+
+	if !envContains(cmd.Env, "GIT_TERMINAL_PROMPT=0") {
+		t.Error("expected GIT_TERMINAL_PROMPT=0 in env")
+	}
+
+	tokenVal, ok := envValue(cmd.Env, "QUADSYNCD_GIT_TOKEN")
+	if !ok {
+		t.Fatal("expected QUADSYNCD_GIT_TOKEN in env")
+	}
+	if tokenVal != "ghp_testtoken123" {
+		t.Errorf("QUADSYNCD_GIT_TOKEN = %q, want %q", tokenVal, "ghp_testtoken123")
+	}
+
+	// Verify git flags were inserted: cmd.Args should contain "-c" and a credential.helper value.
+	foundCredHelper := false
+	for i, a := range cmd.Args {
+		if a == "-c" && i+1 < len(cmd.Args) && strings.HasPrefix(cmd.Args[i+1], "credential.helper=") {
+			foundCredHelper = true
+			break
+		}
+	}
+	if !foundCredHelper {
+		t.Errorf("expected -c credential.helper=... in cmd.Args, got %v", cmd.Args)
+	}
+}
+
+func TestConfigureAuth_NoAuth(t *testing.T) {
+	client := &ShellClient{}
+	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
+
+	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
+		t.Fatalf("configureAuth() error = %v", err)
+	}
+
+	// No special auth vars should be added beyond the inherited environment.
+	if envContains(cmd.Env, "GIT_SSH_COMMAND=") {
+		t.Error("GIT_SSH_COMMAND should not be set")
+	}
+	if envContains(cmd.Env, "QUADSYNCD_GIT_TOKEN=") {
+		t.Error("QUADSYNCD_GIT_TOKEN should not be set")
+	}
+	if envContains(cmd.Env, "GIT_TERMINAL_PROMPT=") {
+		t.Error("GIT_TERMINAL_PROMPT should not be set")
+	}
+}
+
+func TestConfigureAuth_HTTPSTokenReadError(t *testing.T) {
+	client := &ShellClient{httpsTokenFile: filepath.Join(t.TempDir(), "nonexistent")}
+	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
+
+	err := client.configureAuth(cmd, "https://github.com/user/repo.git")
+	if err == nil {
+		t.Fatal("expected error when token file does not exist")
+	}
+	if !strings.Contains(err.Error(), "HTTPS token file") {
+		t.Errorf("error = %q, want it to mention HTTPS token file", err)
+	}
+}
+
+func TestConfigureAuth_SSHWithHTTPSURL(t *testing.T) {
+	client := &ShellClient{sshKeyFile: "/tmp/test-key"}
+	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
+
+	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
+		t.Fatalf("configureAuth() error = %v", err)
+	}
+
+	if envContains(cmd.Env, "GIT_SSH_COMMAND=") {
+		t.Error("GIT_SSH_COMMAND should not be set for HTTPS URL with SSH-only auth")
+	}
+}
+
+func TestConfigureAuth_HTTPSWithSSHURL(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("ghp_testtoken123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &ShellClient{httpsTokenFile: tokenFile}
+	cmd := exec.Command("git", "clone", "git@github.com:user/repo.git", "/dest")
+
+	if err := client.configureAuth(cmd, "git@github.com:user/repo.git"); err != nil {
+		t.Fatalf("configureAuth() error = %v", err)
+	}
+
+	if envContains(cmd.Env, "QUADSYNCD_GIT_TOKEN=") {
+		t.Error("QUADSYNCD_GIT_TOKEN should not be set for SSH URL with HTTPS-only auth")
+	}
+	if envContains(cmd.Env, "GIT_TERMINAL_PROMPT=") {
+		t.Error("GIT_TERMINAL_PROMPT should not be set for SSH URL with HTTPS-only auth")
 	}
 }
