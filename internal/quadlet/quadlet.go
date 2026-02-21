@@ -89,12 +89,31 @@ func DiscoverAllFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-// UnitNameFromQuadlet converts a quadlet filename to its systemd unit name
-// For example: myapp.container -> myapp.service
+// unitServiceSuffix maps quadlet extensions to the infix that Podman's Quadlet
+// generator inserts between the base name and ".service".  Extensions absent
+// from this map (e.g. .container, .kube, .pod) produce plain "<name>.service".
+var unitServiceSuffix = map[string]string{
+	".volume":  "-volume",
+	".network": "-network",
+	".image":   "-image",
+	".build":   "-build",
+}
+
+// UnitNameFromQuadlet converts a quadlet filename to its systemd unit name.
+// Podman's Quadlet generator appends a type-specific infix for some types:
+//
+//	.container → <name>.service
+//	.volume    → <name>-volume.service
+//	.network   → <name>-network.service
+//	.kube      → <name>.service
+//	.image     → <name>-image.service
+//	.build     → <name>-build.service
+//	.pod       → <name>.service
 func UnitNameFromQuadlet(quadletPath string) string {
 	base := filepath.Base(quadletPath)
-	nameWithoutExt := strings.TrimSuffix(base, filepath.Ext(base))
-	return nameWithoutExt + ".service"
+	ext := filepath.Ext(base)
+	nameWithoutExt := strings.TrimSuffix(base, ext)
+	return nameWithoutExt + unitServiceSuffix[ext] + ".service"
 }
 
 // RelativePath returns the relative path from baseDir to target

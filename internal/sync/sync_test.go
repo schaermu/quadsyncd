@@ -492,7 +492,7 @@ func TestAffectedUnits(t *testing.T) {
 
 	units := engine.affectedUnits(plan)
 
-	want := map[string]bool{"app.service": true, "db.service": true, "old.service": true}
+	want := map[string]bool{"app.service": true, "db-volume.service": true, "old-network.service": true}
 	if len(units) != len(want) {
 		t.Fatalf("got %d units, want %d: %v", len(units), len(want), units)
 	}
