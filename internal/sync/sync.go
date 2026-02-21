@@ -317,11 +317,11 @@ func (e *Engine) affectedUnits(plan *Plan) []string {
 	return quadletUnitsFromOps(ops)
 }
 
-// allManagedUnits returns every unit tracked in state (not just changed ones).
+// allManagedUnits returns every restartable unit tracked in state (not just changed ones).
 func (e *Engine) allManagedUnits(state *State) []string {
 	units := make(map[string]bool)
 	for destPath := range state.ManagedFiles {
-		if quadlet.IsQuadletFile(destPath) {
+		if quadlet.IsQuadletFile(destPath) && quadlet.IsRestartableQuadlet(destPath) {
 			units[quadlet.UnitNameFromQuadlet(destPath)] = true
 		}
 	}
@@ -334,11 +334,12 @@ func (e *Engine) allManagedUnits(state *State) []string {
 }
 
 // quadletUnitsFromOps extracts unique systemd unit names from file operations,
-// considering only quadlet files (companion files do not generate units).
+// considering only restartable quadlet files (companion files and non-restartable
+// quadlets like .volume and .network do not generate restartable units).
 func quadletUnitsFromOps(ops []FileOp) []string {
 	units := make(map[string]bool)
 	for _, op := range ops {
-		if quadlet.IsQuadletFile(op.DestPath) {
+		if quadlet.IsQuadletFile(op.DestPath) && quadlet.IsRestartableQuadlet(op.DestPath) {
 			units[quadlet.UnitNameFromQuadlet(op.DestPath)] = true
 		}
 	}

@@ -245,3 +245,44 @@ func TestRelativePath(t *testing.T) {
 		})
 	}
 }
+
+func TestIsRestartableQuadlet(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		// Restartable quadlet types (long-running services)
+		{"myapp.container", true},
+		{"deployment.kube", true},
+		{"group.pod", true},
+		{"/path/to/myapp.container", true},
+		{"/path/to/deployment.kube", true},
+		{"/path/to/group.pod", true},
+
+		// Non-restartable quadlet types (oneshot resource creation)
+		{"db.volume", false},
+		{"net.network", false},
+		{"base.image", false},
+		{"ci.build", false},
+		{"/path/to/db.volume", false},
+		{"/path/to/net.network", false},
+		{"/path/to/base.image", false},
+		{"/path/to/ci.build", false},
+
+		// Non-quadlet files
+		{"readme.txt", false},
+		{"config.yaml", false},
+		{"myapp.env", false},
+		{"Makefile", false},
+		{"", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.path, func(t *testing.T) {
+			got := IsRestartableQuadlet(tc.path)
+			if got != tc.want {
+				t.Errorf("IsRestartableQuadlet(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}

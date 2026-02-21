@@ -97,6 +97,21 @@ func UnitNameFromQuadlet(quadletPath string) string {
 	return nameWithoutExt + ".service"
 }
 
+// IsRestartableQuadlet returns true if the quadlet file generates a service
+// that should be restarted. Volume, network, image, and build files generate
+// oneshot services that create resources and should not be restarted.
+func IsRestartableQuadlet(path string) bool {
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".container", ".kube", ".pod":
+		return true
+	case ".volume", ".network", ".image", ".build":
+		return false
+	default:
+		return false
+	}
+}
+
 // RelativePath returns the relative path from baseDir to target
 func RelativePath(baseDir, target string) (string, error) {
 	return filepath.Rel(baseDir, target)

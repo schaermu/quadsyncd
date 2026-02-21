@@ -492,7 +492,42 @@ func TestAffectedUnits(t *testing.T) {
 
 	units := engine.affectedUnits(plan)
 
-	want := map[string]bool{"app.service": true, "db.service": true, "old.service": true}
+	// Only app.container should generate a restartable unit.
+	// db.volume and old.network are non-restartable (oneshot resource creation).
+	// app.env is a companion file (not a quadlet).
+	want := map[string]bool{"app.service": true}
+	if len(units) != len(want) {
+		t.Fatalf("got %d units, want %d: %v", len(units), len(want), units)
+	}
+	for _, u := range units {
+		if !want[u] {
+			t.Errorf("unexpected unit %q", u)
+		}
+	}
+}
+
+func TestAffectedUnits_FiltersNonRestartable(t *testing.T) {
+	engine := &Engine{logger: testLogger()}
+	plan := &Plan{
+		Add: []FileOp{
+			{DestPath: "/q/app.container"}, // restartable
+			{DestPath: "/q/db.volume"},     // non-restartable
+			{DestPath: "/q/net.network"},   // non-restartable
+			{DestPath: "/q/img.image"},     // non-restartable
+			{DestPath: "/q/bld.build"},     // non-restartable
+			{DestPath: "/q/web.kube"},      // restartable
+			{DestPath: "/q/grp.pod"},       // restartable
+		},
+	}
+
+	units := engine.affectedUnits(plan)
+
+	// Only container, kube, and pod files should generate restartable units
+	want := map[string]bool{
+		"app.service": true,
+		"web.service": true,
+		"grp.service": true,
+	}
 	if len(units) != len(want) {
 		t.Fatalf("got %d units, want %d: %v", len(units), len(want), units)
 	}
