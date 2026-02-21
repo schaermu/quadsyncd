@@ -5,12 +5,14 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      coverage-total: ${{ steps.coverage.outputs.total }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -105,10 +107,18 @@ jobs:
       - name: Integration Tests (Tier 1)
         run: go test -tags=integration ./integration/tier1 -v
 
+  update-badge:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
       - name: Update coverage badge data
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
-          COVERAGE_TOTAL: ${{ steps.coverage.outputs.total }}
+          COVERAGE_TOTAL: ${{ needs.test.outputs.coverage-total }}
         run: |
           PCT="${COVERAGE_TOTAL%\%}"
           if awk "BEGIN{exit !($PCT >= 80)}"; then COLOR="brightgreen"
@@ -118,7 +128,6 @@ jobs:
             "$COVERAGE_TOTAL" "$COLOR" > .github/badges/coverage.json
 
       - name: Commit coverage badge data
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
