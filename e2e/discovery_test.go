@@ -19,7 +19,6 @@ const (
 	stateDir    = "/home/quadsync/.local/state/quadsyncd"
 	statePath   = "/home/quadsync/.local/state/quadsyncd/state.json"
 	quadletFile = "/home/quadsync/.config/containers/systemd/hello.container"
-	sshKeyPath  = "/dev/null" // dummy, unused for local repo
 )
 
 func TestDiscovery(t *testing.T) {
@@ -124,10 +123,7 @@ paths:
 sync:
   prune: true
   restart: none
-
-auth:
-  ssh_key_file: %s
-`, repoPath, quadletDir, stateDir, sshKeyPath)
+`, repoPath, quadletDir, stateDir)
 
 	if err := s.WriteFileUser(ctx, configPath, []byte(config), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
