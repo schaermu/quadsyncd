@@ -90,7 +90,10 @@ jobs:
           COVERAGE_TOTAL: ${{ steps.coverage.outputs.total }}
         run: |
           PCT="${COVERAGE_TOTAL%\%}"
-          awk "BEGIN{exit !($PCT >= 80)}"
+          if ! awk -v pct="$PCT" 'BEGIN { exit (pct >= 80 ? 0 : 1) }'; then
+            echo "Coverage gate failed: got ${COVERAGE_TOTAL}, require at least 80%."
+            exit 1
+          fi
 
       - name: Post coverage comment on PR
         if: github.event_name == 'pull_request'
