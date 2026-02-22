@@ -26,8 +26,11 @@ rootless Podman + systemd user environment.
 | Git client interface | `internal/git/` |
 | systemd user interface | `internal/systemduser/` |
 | Quadlet discovery + unit naming | `internal/quadlet/` |
+| Webhook server + signature verification | `internal/webhook/` |
 | Test helpers / mocks | `internal/testutil/` |
 | systemd unit files | `packaging/systemd/user/` |
+| Integration tests (Tier 1) | `integration/tier1/` |
+| E2E discovery tests | `e2e/` |
 
 ## Validation (match CI)
 
