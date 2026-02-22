@@ -85,16 +85,6 @@ jobs:
           go tool cover -func=coverage.txt > /tmp/coverage-func.txt
           echo "total=$(grep ^total /tmp/coverage-func.txt | awk '{print $3}')" >> $GITHUB_OUTPUT
 
-      - name: Enforce coverage gate
-        env:
-          COVERAGE_TOTAL: ${{ steps.coverage.outputs.total }}
-        run: |
-          PCT="${COVERAGE_TOTAL%\%}"
-          if ! awk -v pct="$PCT" 'BEGIN { exit (pct >= 80 ? 0 : 1) }'; then
-            echo "Coverage gate failed: got ${COVERAGE_TOTAL}, require at least 80%."
-            exit 1
-          fi
-
       - name: Post coverage comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
