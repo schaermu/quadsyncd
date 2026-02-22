@@ -13,6 +13,25 @@ permissions:
   pull-requests: write
 
 jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - uses: github/codeql-action/autobuild@v3
+      - uses: github/codeql-action/analyze@v3
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -172,7 +191,7 @@ jobs:
           git diff --staged --quiet || (git commit -m 'chore: update coverage badge [skip ci]' && git push origin HEAD:refs/heads/badges --force)
 
   build:
-    needs: [lint, vuln-check, test, integration-test]
+    needs: [codeql, lint, vuln-check, test, integration-test]
     strategy:
       fail-fast: false
       matrix:
