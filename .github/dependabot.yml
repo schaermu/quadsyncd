@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - go
+    groups:
+      go-patch:
+        update-types:
+          - patch
+      go-minor:
+        update-types:
+          - minor
+    open-pull-requests-limit: 10
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions-patch:
+        update-types:
+          - patch
+      actions-minor:
+        update-types:
+          - minor
+    open-pull-requests-limit: 5
