@@ -103,6 +103,42 @@ cloudflared tunnel run quadsyncd-webhooks
 
 ## Start Webhook Service
 
+### Option A: Socket Activation (Recommended)
+
+Socket activation starts the webhook service on-demand when the first request arrives:
+
+```bash
+# Install webhook service and socket units
+cp packaging/systemd/user/quadsyncd-webhook.service ~/.config/systemd/user/
+cp packaging/systemd/user/quadsyncd-webhook.socket ~/.config/systemd/user/
+systemctl --user daemon-reload
+
+# Enable and start the socket (not the service)
+systemctl --user enable --now quadsyncd-webhook.socket
+
+# Check socket status
+systemctl --user status quadsyncd-webhook.socket
+
+# Verify the service is not running yet
+systemctl --user status quadsyncd-webhook.service
+```
+
+**Benefits:**
+- Service starts only when needed (first webhook request)
+- Automatic restart if service crashes (socket remains active)
+- Lower resource usage when idle
+- Faster boot times
+
+**How it works:**
+- systemd listens on port 8787
+- First webhook triggers service start
+- quadsyncd receives the socket via LISTEN_FDS
+- Service stops when idle (can be configured with `RuntimeMaxSec`)
+
+### Option B: Always-Running Service
+
+Traditional mode where the service runs continuously:
+
 ```bash
 # Install webhook service unit
 cp packaging/systemd/user/quadsyncd-webhook.service ~/.config/systemd/user/
@@ -154,4 +190,41 @@ Ensure the secret in GitHub matches `webhook_secret` file exactly (no trailing n
 
 ```bash
 journalctl --user -u quadsyncd-webhook.service --since "5 minutes ago"
+```
+
+### Socket Activation Issues
+
+**Service doesn't start on first request:**
+
+```bash
+# Check socket is active
+systemctl --user status quadsyncd-webhook.socket
+
+# Check socket is listening
+ss -tlnp | grep 8787
+
+# View socket logs
+journalctl --user -u quadsyncd-webhook.socket
+```
+
+**Multiple listeners error:**
+
+If you see "received N socket-activated listeners, expected exactly 1":
+
+```bash
+# Edit the socket unit to have only one ListenStream directive
+systemctl --user edit quadsyncd-webhook.socket
+```
+
+**Verifying socket activation mode:**
+
+Check logs to confirm which mode is being used:
+
+```bash
+# Socket activation mode shows:
+# "using systemd socket activation" mode=socket-activated
+
+# Normal bind mode shows:
+# "webhook server bound to address" mode=bind
+journalctl --user -u quadsyncd-webhook.service -n 20
 ```
