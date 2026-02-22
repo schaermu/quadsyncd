@@ -37,4 +37,5 @@ install: build
 	@mkdir -p ~/.config/systemd/user
 	@cp packaging/systemd/user/*.service ~/.config/systemd/user/
 	@cp packaging/systemd/user/*.timer ~/.config/systemd/user/
+	@cp packaging/systemd/user/*.socket ~/.config/systemd/user/ || true
 	@echo "==> Done! Run 'systemctl --user daemon-reload' to load units"

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -643,6 +644,45 @@ func (m *slowMockGitClient) EnsureCheckout(_ context.Context, _, _, _ string) (s
 	m.once.Do(func() { close(m.started) })
 	<-m.proceed
 	return "abc123", nil
+}
+
+func TestStartWithListener(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	// Create a listener
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer func() {
+		_ = listener.Close()
+	}()
+
+	// Cancel the context immediately so StartWithListener returns after the initial sync
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = server.StartWithListener(ctx, listener)
+
+	if !mockGit.checkoutCalled {
+		t.Error("expected initial sync to call git checkout, but it was not called")
+	}
 }
 
 func TestSliceContains(t *testing.T) {
