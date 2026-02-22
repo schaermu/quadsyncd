@@ -135,6 +135,7 @@ systemctl --user status quadsyncd-webhook.service
 - quadsyncd receives the socket via LISTEN_FDS
 - Service stops when idle (can be configured with `RuntimeMaxSec`)
 
+> **Note:** In socket activation mode (Option A), the listen address and port are configured in the `quadsyncd-webhook.socket` unit via its `ListenStream` directive. The `serve.listen_addr` setting in `~/.config/quadsyncd/config.yaml` is only used when running in always-running mode (Option B).
 ### Option B: Always-Running Service
 
 Traditional mode where the service runs continuously:
