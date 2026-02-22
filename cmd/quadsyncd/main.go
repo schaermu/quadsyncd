@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/schaermu/quadsyncd/internal/activation"
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/sync"
@@ -151,11 +152,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create webhook server: %w", err)
 	}
 
-	// Start server
-	logger.Info("starting webhook server", "addr", cfg.Serve.ListenAddr)
-	if err := server.Start(ctx); err != nil {
-		logger.Error("webhook server failed", "error", err)
-		return err
+	// Check for systemd socket activation
+	listeners, err := activation.Listeners()
+	if err != nil {
+		return fmt.Errorf("failed to check for socket activation: %w", err)
+	}
+
+	if len(listeners) > 0 {
+		// Socket activation mode
+		if len(listeners) > 1 {
+			return fmt.Errorf("received %d socket-activated listeners, expected exactly 1", len(listeners))
+		}
+
+		listener := listeners[0]
+		logger.Info("using systemd socket activation", "addr", listener.Addr().String(), "mode", "socket-activated")
+		if err := server.StartWithListener(ctx, listener); err != nil {
+			logger.Error("webhook server failed", "error", err)
+			return err
+		}
+	} else {
+		// Normal bind mode
+		logger.Info("starting webhook server", "addr", cfg.Serve.ListenAddr, "mode", "bind")
+		if err := server.Start(ctx); err != nil {
+			logger.Error("webhook server failed", "error", err)
+			return err
+		}
 	}
 
 	logger.Info("webhook server stopped")

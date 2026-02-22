@@ -1,0 +1,10 @@
+[Unit]
+Description=quadsyncd webhook listener socket (rootless)
+PartOf=quadsyncd-webhook.service
+
+[Socket]
+ListenStream=127.0.0.1:8787
+Accept=no
+
+[Install]
+WantedBy=sockets.target

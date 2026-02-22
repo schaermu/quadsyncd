@@ -86,6 +86,6 @@ MIT License — see [`LICENSE`](LICENSE) for details.
 - [x] Rootless systemd integration
 - [x] State tracking and pruning
 - [x] Webhook mode with GitHub signature verification
-- [ ] Systemd socket activation for webhooks
+- [x] Systemd socket activation for webhooks
 - [ ] Multi-repo support
 - [ ] Dry-run web UI for visualizing changes

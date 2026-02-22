@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -79,7 +80,20 @@ func NewServer(cfg *config.Config, gitClient git.Client, systemd systemduser.Sys
 }
 
 // Start starts the webhook HTTP server, performing an initial sync first.
+// It binds to the configured address.
 func (s *Server) Start(ctx context.Context) error {
+	listener, err := net.Listen("tcp", s.cfg.Serve.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("failed to bind to %s: %w", s.cfg.Serve.ListenAddr, err)
+	}
+
+	s.logger.Info("webhook server bound to address", "addr", s.cfg.Serve.ListenAddr, "mode", "bind")
+	return s.StartWithListener(ctx, listener)
+}
+
+// StartWithListener starts the webhook HTTP server using a provided listener,
+// performing an initial sync first. This supports systemd socket activation.
+func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
 	s.logger.Info("performing initial sync before starting webhook server")
 	s.performSync(ctx)
 
@@ -87,7 +101,6 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/", s.handleWebhook)
 
 	server := &http.Server{
-		Addr:              s.cfg.Serve.ListenAddr,
 		Handler:           mux,
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -99,8 +112,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start server in goroutine
 	errCh := make(chan error, 1)
 	go func() {
-		s.logger.Info("webhook server starting", "addr", s.cfg.Serve.ListenAddr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.logger.Info("webhook server starting", "addr", listener.Addr().String())
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
