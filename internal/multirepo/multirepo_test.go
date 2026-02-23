@@ -204,6 +204,23 @@ func TestMerge_EmptyStates(t *testing.T) {
 	}
 }
 
+func TestMerge_UnknownConflictMode_ReturnsError(t *testing.T) {
+	// Two repos contribute the same path — triggers the conflict switch.
+	states := []RepoState{
+		fakeRepoState("https://a.example/repo", "refs/heads/main", "sha-a", 0, map[string]string{
+			"app.container": "/a/app.container",
+		}),
+		fakeRepoState("https://b.example/repo", "refs/heads/main", "sha-b", 0, map[string]string{
+			"app.container": "/b/app.container",
+		}),
+	}
+
+	_, err := Merge(states, config.ConflictMode("bogus"))
+	if err == nil {
+		t.Fatal("expected error for unknown conflict mode, got nil")
+	}
+}
+
 // ---- LoadRepoState ----
 
 func TestLoadRepoState_Success(t *testing.T) {

@@ -340,6 +340,40 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "legacy repo.subdir traversal rejected",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL:    "git@github.com:test/repo.git",
+					Ref:    "main",
+					Subdir: "../etc",
+				},
+				Paths: PathsConfig{
+					QuadletDir: "/absolute/path",
+					StateDir:   "/absolute/state",
+				},
+				Auth: AuthConfig{SSHKeyFile: "/key"},
+				Sync: SyncConfig{Restart: RestartChanged},
+			},
+			wantErr: true,
+		},
+		{
+			name: "legacy repo.subdir absolute path rejected",
+			cfg: Config{
+				Repo: RepoConfig{
+					URL:    "git@github.com:test/repo.git",
+					Ref:    "main",
+					Subdir: "/absolute/subdir",
+				},
+				Paths: PathsConfig{
+					QuadletDir: "/absolute/path",
+					StateDir:   "/absolute/state",
+				},
+				Auth: AuthConfig{SSHKeyFile: "/key"},
+				Sync: SyncConfig{Restart: RestartChanged},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

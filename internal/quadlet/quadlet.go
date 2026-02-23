@@ -109,12 +109,9 @@ func DiscoverAllFilesWithSymlinkCheck(dir string) ([]string, error) {
 		}
 
 		if !info.IsDir() {
-			// filepath.Walk uses os.Lstat for symlinks; re-check to be certain.
-			linfo, lerr := os.Lstat(path)
-			if lerr != nil {
-				return lerr
-			}
-			if linfo.Mode()&os.ModeSymlink != 0 {
+			// filepath.Walk uses os.Lstat internally, so info.Mode() already
+			// reflects the symlink mode bit without following the link.
+			if info.Mode()&os.ModeSymlink != 0 {
 				return fmt.Errorf("symlinks are not allowed in repo sources: %s", path)
 			}
 			files = append(files, path)

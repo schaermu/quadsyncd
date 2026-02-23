@@ -484,7 +484,15 @@ func (e *Engine) buildStateFromEffective(prevState *State, plan *Plan, repoState
 	}
 
 	for _, op := range append(plan.Add, plan.Update...) {
-		relPath, _ := filepath.Rel(e.cfg.Paths.QuadletDir, op.DestPath)
+		relPath, err := filepath.Rel(e.cfg.Paths.QuadletDir, op.DestPath)
+		if err != nil {
+			e.logger.Error("failed to compute relative path for managed file",
+				"quadletDir", e.cfg.Paths.QuadletDir,
+				"destPath", op.DestPath,
+				"error", err,
+			)
+			relPath = op.DestPath
+		}
 		state.ManagedFiles[op.DestPath] = ManagedFile{
 			SourcePath: filepath.ToSlash(relPath),
 			Hash:       op.Hash,

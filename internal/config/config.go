@@ -165,6 +165,15 @@ func (c *Config) Validate() error {
 		if c.Repo.Ref == "" {
 			return fmt.Errorf("repo.ref is required")
 		}
+		if c.Repo.Subdir != "" {
+			if filepath.IsAbs(c.Repo.Subdir) {
+				return fmt.Errorf("repo.subdir must be a relative path: %s", c.Repo.Subdir)
+			}
+			cleaned := filepath.ToSlash(filepath.Clean(c.Repo.Subdir))
+			if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+				return fmt.Errorf("repo.subdir must not contain path traversal: %s", c.Repo.Subdir)
+			}
+		}
 		if err := validateAuth(&c.Auth, c.Repo.URL); err != nil {
 			return err
 		}

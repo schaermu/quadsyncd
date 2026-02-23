@@ -193,7 +193,7 @@ func Merge(states []RepoState, conflictMode config.ConflictMode) (MergeResult, e
 		conflicts = append(conflicts, Conflict{MergeKey: key, Winner: winner, Losers: losers})
 
 		switch conflictMode {
-		case config.ConflictFail, "":
+		case config.ConflictFail:
 			loserDescs := make([]string, len(losers))
 			for i, l := range losers {
 				loserDescs[i] = fmt.Sprintf("%s@%s", l.SourceRepo, l.SourceRef)
@@ -206,6 +206,8 @@ func Merge(states []RepoState, conflictMode config.ConflictMode) (MergeResult, e
 			)
 		case config.ConflictPreferHighestPriority:
 			items = append(items, winner)
+		default:
+			return MergeResult{}, fmt.Errorf("unknown conflict_handling mode: %q", conflictMode)
 		}
 	}
 
