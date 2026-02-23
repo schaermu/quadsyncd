@@ -1,6 +1,10 @@
 # quadsyncd configuration example
 # Copy this file to ~/.config/quadsyncd/config.yaml and customize
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Single-repository mode (original, still fully supported)
+# ──────────────────────────────────────────────────────────────────────────────
+
 # Git repository configuration
 repo:
   # Repository URL (supports SSH or HTTPS)
@@ -9,6 +13,31 @@ repo:
   ref: "refs/heads/main"
   # Subdirectory within the repo containing quadlet files
   subdir: "quadlets"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Multi-repository mode (mutually exclusive with `repo` above)
+# Remove or comment out the `repo` block above when using `repositories`.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# repositories:
+#   # First repo: highest priority (wins on same-path conflicts)
+#   - url: "git@github.com:ORG/BASE-QUADLETS.git"
+#     ref: "refs/heads/main"
+#     priority: 10
+#     subdir: "quadlets"
+#
+#   # Second repo: override-specific quadlets (lower priority)
+#   - url: "git@github.com:ORG/HOST-OVERRIDES.git"
+#     ref: "refs/heads/main"
+#     priority: 5
+#     # Per-repo auth override (optional; falls back to global `auth` if omitted)
+#     auth:
+#       ssh_key_file: "${HOME}/.ssh/overrides_deploy_key"
+#
+#   # Third repo: public repo, no auth required
+#   - url: "https://github.com/ORG/PUBLIC-QUADLETS.git"
+#     ref: "refs/heads/stable"
+#     priority: 1
 
 # Path configuration
 paths:
@@ -20,15 +49,20 @@ paths:
 
 # Sync behavior
 sync:
-  # Whether to remove managed quadlet files that no longer exist in the repo
+  # Whether to remove managed quadlet files that no longer exist in any repo
   prune: true
   # Restart policy after sync: "none", "changed", or "all-managed"
   # - none: only run daemon-reload
   # - changed: restart units whose quadlet files changed
   # - all-managed: restart all units from managed quadlet files
   restart: "changed"
+  # How to resolve same-path conflicts when multiple repos provide the same file
+  # (only relevant in multi-repo mode):
+  # - prefer_highest_priority: choose the highest-priority repo and emit a warning
+  # - fail: abort the sync and enumerate all conflicts
+  # conflict_handling: "prefer_highest_priority"
 
-# Authentication configuration (choose one)
+# Authentication configuration (global default; choose one)
 auth:
   # Path to SSH private key for git operations
   ssh_key_file: "${HOME}/.ssh/quadsyncd_deploy_key"

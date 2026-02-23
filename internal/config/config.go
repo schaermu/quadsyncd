@@ -31,12 +31,12 @@ const (
 
 // Config represents the complete quadsyncd configuration
 type Config struct {
-	Repo         RepoConfig   `yaml:"repo"`
-	Repositories []RepoSpec   `yaml:"repositories"`
-	Paths        PathsConfig  `yaml:"paths"`
-	Sync         SyncConfig   `yaml:"sync"`
-	Auth         AuthConfig   `yaml:"auth"`
-	Serve        ServeConfig  `yaml:"serve"`
+	Repo         RepoConfig  `yaml:"repo"`
+	Repositories []RepoSpec  `yaml:"repositories"`
+	Paths        PathsConfig `yaml:"paths"`
+	Sync         SyncConfig  `yaml:"sync"`
+	Auth         AuthConfig  `yaml:"auth"`
+	Serve        ServeConfig `yaml:"serve"`
 }
 
 // RepoConfig configures the Git repository source (legacy single-repo field)
@@ -63,7 +63,7 @@ type PathsConfig struct {
 
 // SyncConfig configures sync behavior
 type SyncConfig struct {
-	Prune            bool         `yaml:"prune"`
+	Prune            bool          `yaml:"prune"`
 	Restart          RestartPolicy `yaml:"restart"`
 	ConflictHandling ConflictMode  `yaml:"conflict_handling"`
 }
@@ -342,4 +342,3 @@ func (c *Config) IsHTTPS() bool {
 func (c *Config) IsSSH() bool {
 	return strings.HasPrefix(c.Repo.URL, "git@") || strings.HasPrefix(c.Repo.URL, "ssh://")
 }
-

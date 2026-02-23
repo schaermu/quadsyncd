@@ -40,8 +40,6 @@ func fakeRepoState(url, ref, commit string, priority int, files map[string]strin
 	return RepoState{Spec: spec, Commit: commit, Files: repoFiles}
 }
 
-// ---- normalizeMergeKey ----
-
 func TestNormalizeMergeKey(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -82,10 +80,10 @@ func TestNormalizeMergeKey(t *testing.T) {
 
 func TestMerge_DisjointPaths(t *testing.T) {
 	states := []RepoState{
-		fakeRepoState("https://a.example/repo1", "main", "sha1", 0, map[string]string{
+		fakeRepoState("https://a.example/repo1", "refs/heads/main", "sha1", 0, map[string]string{
 			"app.container": "/repo1/app.container",
 		}),
-		fakeRepoState("https://b.example/repo2", "main", "sha2", 0, map[string]string{
+		fakeRepoState("https://b.example/repo2", "refs/heads/stable", "sha2", 0, map[string]string{
 			"db.container": "/repo2/db.container",
 		}),
 	}
@@ -222,7 +220,7 @@ func TestLoadRepoState_Success(t *testing.T) {
 		},
 	}
 
-	spec := makeSpec("https://example.com/repo", "main", 0)
+	spec := makeSpec("https://example.com/repo", "refs/heads/main", 5)
 	rs, err := LoadRepoState(context.Background(), spec, repoDir, srcDir, gitMock)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -239,7 +237,7 @@ func TestLoadRepoState_GitError(t *testing.T) {
 	tmpDir := t.TempDir()
 	gitErr := errors.New("clone failed")
 	gitMock := &mockGitClient{err: gitErr}
-	spec := makeSpec("https://example.com/repo", "main", 0)
+	spec := makeSpec("https://other.example/repo", "refs/heads/main", 0)
 
 	_, err := LoadRepoState(context.Background(), spec, filepath.Join(tmpDir, "repo"), tmpDir, gitMock)
 	if err == nil {
@@ -264,7 +262,7 @@ func TestLoadRepoState_RejectsSymlinks(t *testing.T) {
 	}
 
 	gitMock := &mockGitClient{commit: "abc"}
-	spec := makeSpec("https://example.com/repo", "main", 0)
+	spec := makeSpec("https://symlink.example/repo", "refs/heads/main", 0)
 
 	_, err := LoadRepoState(context.Background(), spec, repoDir, repoDir, gitMock)
 	if err == nil {

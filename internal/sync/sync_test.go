@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/schaermu/quadsyncd/internal/config"
+	"github.com/schaermu/quadsyncd/internal/git"
+	"github.com/schaermu/quadsyncd/internal/multirepo"
 )
 
 // mockGitClient implements git.Client for testing.
@@ -1129,5 +1131,278 @@ func TestRun_ValidateQuadletsCalled(t *testing.T) {
 	}
 	if !ms.reloadCalled {
 		t.Error("DaemonReload should be called after successful validation")
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Multi-repo integration tests
+// ──────────────────────────────────────────────────────────────────────────────
+
+// multiMockGitClient routes EnsureCheckout calls to per-URL handlers.
+type multiMockGitClient struct {
+	handlers map[string]*mockGitClient
+}
+
+func (m *multiMockGitClient) EnsureCheckout(ctx context.Context, url, ref, destDir string) (string, error) {
+	if h, ok := m.handlers[url]; ok {
+		return h.EnsureCheckout(ctx, url, ref, destDir)
+	}
+	return "", fmt.Errorf("no handler for URL %q", url)
+}
+
+func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	url1 := "git@github.com:org/repo1.git"
+	url2 := "git@github.com:org/repo2.git"
+
+	cfg := &config.Config{
+		Repositories: []config.RepoSpec{
+			{URL: url1, Ref: "main", Priority: 10},
+			{URL: url2, Ref: "main", Priority: 5},
+		},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: true, Restart: config.RestartNone, ConflictHandling: config.ConflictPreferHighestPriority},
+	}
+
+	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+		url1: {
+			commitHash: "sha1",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=alpine\n"), 0644)
+			},
+		},
+		url2: {
+			commitHash: "sha2",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "db.container"), []byte("[Container]\nImage=postgres\n"), 0644)
+			},
+		},
+	}}
+
+	factory := func(auth config.AuthConfig) git.Client { return mc }
+	sd := &mockSystemd{available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("Run multi-repo: %v", err)
+	}
+
+	// Both files must exist in the quadlet dir
+	for _, name := range []string{"app.container", "db.container"} {
+		if _, err := os.Stat(filepath.Join(quadletDir, name)); err != nil {
+			t.Errorf("expected %s to be synced: %v", name, err)
+		}
+	}
+
+	// State must record both repo revisions
+	eng := &Engine{cfg: cfg, logger: testLogger()}
+	state, err := eng.loadState()
+	if err != nil {
+		t.Fatalf("loadState: %v", err)
+	}
+	if len(state.Revisions) != 2 {
+		t.Errorf("expected 2 revisions in state, got %d", len(state.Revisions))
+	}
+	if state.Revisions[url1] != "sha1" {
+		t.Errorf("revision for repo1 = %q, want sha1", state.Revisions[url1])
+	}
+	if state.Revisions[url2] != "sha2" {
+		t.Errorf("revision for repo2 = %q, want sha2", state.Revisions[url2])
+	}
+}
+
+func TestRun_MultiRepo_ConflictPreferHighestPriority(t *testing.T) {
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	stateDir := filepath.Join(tmpDir, "state")
+
+	url1 := "git@github.com:org/repo-hi.git" // priority 10 - wins
+	url2 := "git@github.com:org/repo-lo.git" // priority 5 - loses
+
+	cfg := &config.Config{
+		Repositories: []config.RepoSpec{
+			{URL: url1, Ref: "main", Priority: 10},
+			{URL: url2, Ref: "main", Priority: 5},
+		},
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone, ConflictHandling: config.ConflictPreferHighestPriority},
+	}
+
+	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+		url1: {
+			commitHash: "sha-hi",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=winner\n"), 0644)
+			},
+		},
+		url2: {
+			commitHash: "sha-lo",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=loser\n"), 0644)
+			},
+		},
+	}}
+
+	factory := func(auth config.AuthConfig) git.Client { return mc }
+	sd := &mockSystemd{available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+
+	if err := engine.Run(context.Background()); err != nil {
+		t.Fatalf("Run multi-repo conflict: %v", err)
+	}
+
+	// Winner (high priority) content must be present
+	data, err := os.ReadFile(filepath.Join(quadletDir, "app.container"))
+	if err != nil {
+		t.Fatalf("read app.container: %v", err)
+	}
+	if string(data) != "[Container]\nImage=winner\n" {
+		t.Errorf("content = %q, want winner image", string(data))
+	}
+}
+
+func TestRun_MultiRepo_ConflictFail(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	url1 := "git@github.com:org/repo1.git"
+	url2 := "git@github.com:org/repo2.git"
+
+	cfg := &config.Config{
+		Repositories: []config.RepoSpec{
+			{URL: url1, Ref: "main", Priority: 5},
+			{URL: url2, Ref: "main", Priority: 5},
+		},
+		Paths: config.PathsConfig{QuadletDir: filepath.Join(tmpDir, "q"), StateDir: filepath.Join(tmpDir, "s")},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone, ConflictHandling: config.ConflictFail},
+	}
+
+	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+		url1: {
+			commitHash: "sha1",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "shared.container"), []byte("[Container]\nImage=a\n"), 0644)
+			},
+		},
+		url2: {
+			commitHash: "sha2",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "shared.container"), []byte("[Container]\nImage=b\n"), 0644)
+			},
+		},
+	}}
+
+	factory := func(auth config.AuthConfig) git.Client { return mc }
+	sd := &mockSystemd{available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected conflict error in fail mode, got nil")
+	}
+	// No files should have been applied
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "q", "shared.container")); !os.IsNotExist(statErr) {
+		t.Error("no files should be written when conflict mode is fail")
+	}
+}
+
+func TestRun_MultiRepo_FailFast_OneRepoErrors(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	url1 := "git@github.com:org/good-repo.git"
+	url2 := "git@github.com:org/bad-repo.git"
+
+	cfg := &config.Config{
+		Repositories: []config.RepoSpec{
+			{URL: url1, Ref: "main", Priority: 10},
+			{URL: url2, Ref: "main", Priority: 5},
+		},
+		Paths: config.PathsConfig{QuadletDir: filepath.Join(tmpDir, "q"), StateDir: filepath.Join(tmpDir, "s")},
+		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
+	}
+
+	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+		url1: {
+			commitHash: "sha1",
+			repoSetup: func(destDir string) {
+				_ = os.MkdirAll(destDir, 0755)
+				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\n"), 0644)
+			},
+		},
+		url2: {err: errors.New("clone failed")},
+	}}
+
+	factory := func(auth config.AuthConfig) git.Client { return mc }
+	sd := &mockSystemd{available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+
+	err := engine.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when one repo fails, got nil")
+	}
+	// No files should have been applied (fail-fast)
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "q", "app.container")); !os.IsNotExist(statErr) {
+		t.Error("no files should be written when a repo load fails")
+	}
+}
+
+func TestBuildStateFromEffective_ProvenanceRecorded(t *testing.T) {
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "q")
+	stateDir := filepath.Join(tmpDir, "s")
+
+	cfg := &config.Config{
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+	}
+	engine := &Engine{cfg: cfg, logger: testLogger()}
+
+	repoStates := []multirepo.RepoState{
+		{
+			Spec:   config.RepoSpec{URL: "https://repo1.example/r.git", Ref: "main"},
+			Commit: "abc123",
+			Files:  []multirepo.RepoFile{{MergeKey: "app.container", AbsPath: "/src/app.container"}},
+		},
+	}
+
+	plan := &Plan{
+		Add: []FileOp{{
+			SourcePath: "/src/app.container",
+			DestPath:   filepath.Join(quadletDir, "app.container"),
+			Hash:       "hashval",
+			SourceRepo: "https://repo1.example/r.git",
+			SourceRef:  "main",
+			SourceSHA:  "abc123",
+		}},
+		Update: []FileOp{},
+		Delete: []FileOp{},
+	}
+
+	state := engine.buildStateFromEffective(nil, plan, repoStates)
+
+	if state.Revisions["https://repo1.example/r.git"] != "abc123" {
+		t.Errorf("revision = %q, want abc123", state.Revisions["https://repo1.example/r.git"])
+	}
+	// Single-repo compat: Commit field also set
+	if state.Commit != "abc123" {
+		t.Errorf("state.Commit = %q, want abc123", state.Commit)
+	}
+
+	mf, ok := state.ManagedFiles[filepath.Join(quadletDir, "app.container")]
+	if !ok {
+		t.Fatal("managed file not found in state")
+	}
+	if mf.SourceRepo != "https://repo1.example/r.git" {
+		t.Errorf("SourceRepo = %q, want https://repo1.example/r.git", mf.SourceRepo)
+	}
+	if mf.SourceSHA != "abc123" {
+		t.Errorf("SourceSHA = %q, want abc123", mf.SourceSHA)
 	}
 }
