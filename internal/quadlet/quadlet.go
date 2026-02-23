@@ -1,6 +1,7 @@
 package quadlet
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,45 @@ func DiscoverAllFiles(dir string) ([]string, error) {
 		}
 
 		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+// DiscoverAllFilesWithSymlinkCheck finds all non-hidden files in dir like
+// DiscoverAllFiles, but returns an error if any symlink is encountered.
+func DiscoverAllFilesWithSymlinkCheck(dir string) ([]string, error) {
+	var files []string
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip hidden files and directories (e.g. .git, .gitignore)
+		if path != dir && strings.HasPrefix(info.Name(), ".") {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if !info.IsDir() {
+			// filepath.Walk uses os.Lstat for symlinks; re-check to be certain.
+			linfo, lerr := os.Lstat(path)
+			if lerr != nil {
+				return lerr
+			}
+			if linfo.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("symlinks are not allowed in repo sources: %s", path)
+			}
 			files = append(files, path)
 		}
 		return nil

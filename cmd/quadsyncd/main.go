@@ -108,11 +108,13 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dependencies
-	gitClient := git.NewShellClient(cfg.Auth.SSHKeyFile, cfg.Auth.HTTPSTokenFile)
+	factory := func(auth config.AuthConfig) git.Client {
+		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile)
+	}
 	systemdClient := systemduser.NewClient()
 
 	// Create sync engine
-	engine := sync.NewEngine(cfg, gitClient, systemdClient, logger, dryRun)
+	engine := sync.NewEngineWithFactory(cfg, factory, systemdClient, logger, dryRun)
 
 	// Run sync
 	logger.Info("starting sync operation")
