@@ -233,8 +233,7 @@ func loadConfig(logger *slog.Logger) (*config.Config, error) {
 	}
 
 	logger.Debug("configuration loaded",
-		"repo", cfg.Repo.URL,
-		"ref", cfg.Repo.Ref,
+		"repositories", len(cfg.EffectiveRepositories()),
 		"quadlet_dir", cfg.Paths.QuadletDir,
 		"state_dir", cfg.Paths.StateDir)
 

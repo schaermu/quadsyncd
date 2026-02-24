@@ -60,18 +60,10 @@ func NewEngineWithFactory(cfg *config.Config, factory GitClientFactory, systemd 
 // Run executes the complete sync process
 func (e *Engine) Run(ctx context.Context) error {
 	repos := e.cfg.EffectiveRepositories()
-	isMulti := len(e.cfg.Repositories) > 0
 
-	if isMulti {
-		e.logger.Info("starting multi-repo sync",
-			"repo_count", len(repos),
-			"dry_run", e.dryRun)
-	} else {
-		e.logger.Info("starting sync",
-			"repo", e.cfg.Repo.URL,
-			"ref", e.cfg.Repo.Ref,
-			"dry_run", e.dryRun)
-	}
+	e.logger.Info("starting sync",
+		"repo_count", len(repos),
+		"dry_run", e.dryRun)
 
 	// Ensure state directory exists
 	if err := os.MkdirAll(e.cfg.Paths.StateDir, 0755); err != nil {
@@ -79,7 +71,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	// Load all repo states (fail-fast: if any repo fails, nothing is applied)
-	repoStates, err := e.loadAllRepoStates(ctx, repos, isMulti)
+	repoStates, err := e.loadAllRepoStates(ctx, repos)
 	if err != nil {
 		return err
 	}
@@ -184,7 +176,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 // loadAllRepoStates loads all repositories fail-fast.
 // If any repo fails to load, the function returns immediately.
-func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec, isMulti bool) ([]multirepo.RepoState, error) {
+func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec) ([]multirepo.RepoState, error) {
 	states := make([]multirepo.RepoState, 0, len(repos))
 
 	for _, spec := range repos {
@@ -195,14 +187,8 @@ func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec,
 			gitClient = e.git
 		}
 
-		var repoDir, srcDir string
-		if isMulti {
-			repoDir = e.cfg.RepoDirForSpec(spec)
-			srcDir = e.cfg.QuadletSourceDirForSpec(spec)
-		} else {
-			repoDir = e.cfg.RepoDir()
-			srcDir = e.cfg.QuadletSourceDir()
-		}
+		repoDir := e.cfg.RepoDirForSpec(spec)
+		srcDir := e.cfg.QuadletSourceDirForSpec(spec)
 
 		e.logger.Info("fetching repository", "repo", spec.URL, "ref", spec.Ref, "dest", repoDir)
 
@@ -270,32 +256,6 @@ func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.Effe
 	sort.Slice(plan.Delete, func(i, j int) bool { return plan.Delete[i].DestPath < plan.Delete[j].DestPath })
 
 	return plan, nil
-}
-
-// buildPlan computes the diff between desired and current state using the
-// single-repo source directory.  Kept for direct use in tests.
-func (e *Engine) buildPlan(prevState *State) (*Plan, error) {
-	sourceFiles, err := quadlet.DiscoverAllFiles(e.cfg.QuadletSourceDir())
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover source files: %w", err)
-	}
-
-	e.logger.Info("discovered source files", "count", len(sourceFiles))
-
-	items := make([]multirepo.EffectiveItem, 0, len(sourceFiles))
-	srcDir := e.cfg.QuadletSourceDir()
-	for _, absPath := range sourceFiles {
-		relPath, err := filepath.Rel(srcDir, absPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute relative path: %w", err)
-		}
-		items = append(items, multirepo.EffectiveItem{
-			MergeKey: filepath.ToSlash(relPath),
-			AbsPath:  absPath,
-		})
-	}
-
-	return e.buildPlanFromEffective(prevState, items)
 }
 
 // applyPlan executes the sync plan
@@ -499,34 +459,6 @@ func (e *Engine) buildStateFromEffective(prevState *State, plan *Plan, repoState
 			SourceRepo: op.SourceRepo,
 			SourceRef:  op.SourceRef,
 			SourceSHA:  op.SourceSHA,
-		}
-	}
-
-	return state
-}
-
-// buildState creates a new State from the applied plan (legacy single-repo path).
-func (e *Engine) buildState(prevState *State, plan *Plan, commit string) *State {
-	state := &State{
-		Commit:       commit,
-		ManagedFiles: make(map[string]ManagedFile),
-	}
-
-	if prevState != nil {
-		for destPath, managed := range prevState.ManagedFiles {
-			state.ManagedFiles[destPath] = managed
-		}
-	}
-
-	for _, op := range plan.Delete {
-		delete(state.ManagedFiles, op.DestPath)
-	}
-
-	for _, op := range append(plan.Add, plan.Update...) {
-		relPath, _ := quadlet.RelativePath(e.cfg.QuadletSourceDir(), op.SourcePath)
-		state.ManagedFiles[op.DestPath] = ManagedFile{
-			SourcePath: relPath,
-			Hash:       op.Hash,
 		}
 	}
 
