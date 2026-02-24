@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/config"
+	"github.com/schaermu/quadsyncd/internal/git"
 )
 
 // mockGitClient is a mock implementation of git.Client
@@ -31,6 +32,11 @@ func (m *mockGitClient) EnsureCheckout(ctx context.Context, url, ref, dest strin
 		return "", http.ErrServerClosed
 	}
 	return "abc123", nil
+}
+
+// mockGitFactory returns a GitClientFactory that always returns the given mock.
+func mockGitFactory(mock *mockGitClient) GitClientFactory {
+	return func(_ config.AuthConfig) git.Client { return mock }
 }
 
 // mockSystemd is a mock implementation of systemduser.Systemd
@@ -119,7 +125,7 @@ func TestNewServer(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -141,7 +147,7 @@ func TestNewServer_MissingSecretFile(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	_, err := NewServer(cfg, mockGit, mockSys, logger)
+	_, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err == nil {
 		t.Fatal("expected error for missing secret file, got nil")
 	}
@@ -161,7 +167,7 @@ func TestStart_PerformsInitialSync(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -184,7 +190,7 @@ func TestVerifySignature(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -274,7 +280,7 @@ func TestIsEventTypeAllowed(t *testing.T) {
 			mockGit := &mockGitClient{}
 			mockSys := &mockSystemd{}
 
-			server, err := NewServer(cfg, mockGit, mockSys, logger)
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -324,7 +330,7 @@ func TestIsRefAllowed(t *testing.T) {
 			mockGit := &mockGitClient{}
 			mockSys := &mockSystemd{}
 
-			server, err := NewServer(cfg, mockGit, mockSys, logger)
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -352,7 +358,7 @@ func TestHandleWebhook_ValidRequest(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -388,7 +394,7 @@ func TestHandleWebhook_InvalidMethod(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -410,7 +416,7 @@ func TestHandleWebhook_InvalidContentType(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -433,7 +439,7 @@ func TestHandleWebhook_InvalidSignature(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -460,7 +466,7 @@ func TestHandleWebhook_DisallowedEventType(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -492,7 +498,7 @@ func TestHandleWebhook_DisallowedRef(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -576,7 +582,7 @@ func TestPerformSync_SingleFlight(t *testing.T) {
 	}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, slowGit, mockSys, logger)
+	server, err := NewServer(cfg, func(_ config.AuthConfig) git.Client { return slowGit }, mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -660,7 +666,7 @@ func TestStartWithListener(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGit, mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -706,4 +712,228 @@ func TestSliceContains(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRepoFullNameFromURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{name: "https with .git", url: "https://github.com/org/repo.git", want: "org/repo"},
+		{name: "https without .git", url: "https://github.com/org/repo", want: "org/repo"},
+		{name: "ssh shorthand with .git", url: "git@github.com:org/repo.git", want: "org/repo"},
+		{name: "ssh shorthand without .git", url: "git@github.com:org/repo", want: "org/repo"},
+		{name: "ssh scheme", url: "ssh://git@github.com/org/repo.git", want: "org/repo"},
+		{name: "http", url: "http://github.com/org/repo.git", want: "org/repo"},
+		{name: "empty", url: "", want: ""},
+		{name: "no slash after host", url: "https://github.com", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := repoFullNameFromURL(tt.url)
+			if got != tt.want {
+				t.Errorf("repoFullNameFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesConfiguredRepo(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	tests := []struct {
+		name  string
+		repos []config.RepoSpec
+		event GitHubPushEvent
+		want  bool
+	}{
+		{
+			name: "single repo matching URL and ref",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/repo.git", Ref: "refs/heads/main"},
+			},
+			event: makeEvent("org/repo", "https://github.com/org/repo.git", "git@github.com:org/repo.git", "refs/heads/main"),
+			want:  true,
+		},
+		{
+			name: "single repo matching URL wrong ref",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/repo.git", Ref: "refs/heads/main"},
+			},
+			event: makeEvent("org/repo", "https://github.com/org/repo.git", "git@github.com:org/repo.git", "refs/heads/develop"),
+			want:  false,
+		},
+		{
+			name: "single repo wrong URL",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/other.git", Ref: "refs/heads/main"},
+			},
+			event: makeEvent("org/repo", "https://github.com/org/repo.git", "git@github.com:org/repo.git", "refs/heads/main"),
+			want:  false,
+		},
+		{
+			name: "multi repo first matches",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/repo1.git", Ref: "refs/heads/main"},
+				{URL: "git@github.com:org/repo2.git", Ref: "refs/heads/stable"},
+			},
+			event: makeEvent("org/repo1", "https://github.com/org/repo1.git", "git@github.com:org/repo1.git", "refs/heads/main"),
+			want:  true,
+		},
+		{
+			name: "multi repo second matches via SSH",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/repo1.git", Ref: "refs/heads/main"},
+				{URL: "git@github.com:org/repo2.git", Ref: "refs/heads/stable"},
+			},
+			event: makeEvent("org/repo2", "https://github.com/org/repo2.git", "git@github.com:org/repo2.git", "refs/heads/stable"),
+			want:  true,
+		},
+		{
+			name: "multi repo correct repo wrong ref",
+			repos: []config.RepoSpec{
+				{URL: "https://github.com/org/repo1.git", Ref: "refs/heads/main"},
+				{URL: "git@github.com:org/repo2.git", Ref: "refs/heads/stable"},
+			},
+			event: makeEvent("org/repo2", "https://github.com/org/repo2.git", "git@github.com:org/repo2.git", "refs/heads/main"),
+			want:  false,
+		},
+		{
+			name:  "no repos configured",
+			repos: nil,
+			event: makeEvent("org/repo", "https://github.com/org/repo.git", "git@github.com:org/repo.git", "refs/heads/main"),
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg.Repository = nil
+			cfg.Repositories = tt.repos
+
+			mockGit := &mockGitClient{}
+			mockSys := &mockSystemd{}
+
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+			if err != nil {
+				t.Fatalf("NewServer() failed: %v", err)
+			}
+
+			got := server.matchesConfiguredRepo(tt.event)
+			if got != tt.want {
+				t.Errorf("matchesConfiguredRepo() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleWebhook_UnconfiguredRepo(t *testing.T) {
+	cfg, secret := setupTestConfig(t)
+	// Override to multi-repo with a different repo than the event sends
+	cfg.Repository = nil
+	cfg.Repositories = []config.RepoSpec{
+		{URL: "https://github.com/org/other.git", Ref: "refs/heads/main"},
+	}
+	cfg.Serve.AllowedRefs = []string{} // disable global ref filter
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	body := []byte(`{
+		"ref": "refs/heads/main",
+		"after": "abc123",
+		"repository": {
+			"full_name": "org/repo",
+			"clone_url": "https://github.com/org/repo.git",
+			"ssh_url": "git@github.com:org/repo.git"
+		}
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
+
+	rec := httptest.NewRecorder()
+	server.handleWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("Repository/ref not configured")) {
+		t.Errorf("expected 'Repository/ref not configured' message, got: %s", rec.Body.String())
+	}
+}
+
+func TestHandleWebhook_MultiRepo_MatchesSecondRepo(t *testing.T) {
+	cfg, secret := setupTestConfig(t)
+	cfg.Repository = nil
+	cfg.Repositories = []config.RepoSpec{
+		{URL: "https://github.com/org/repo1.git", Ref: "refs/heads/main"},
+		{URL: "git@github.com:org/repo2.git", Ref: "refs/heads/stable"},
+	}
+	cfg.Serve.AllowedRefs = []string{} // disable global ref filter
+
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	body := []byte(`{
+		"ref": "refs/heads/stable",
+		"after": "def456",
+		"repository": {
+			"full_name": "org/repo2",
+			"clone_url": "https://github.com/org/repo2.git",
+			"ssh_url": "git@github.com:org/repo2.git"
+		}
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "push")
+	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
+
+	rec := httptest.NewRecorder()
+	server.handleWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("Sync triggered")) {
+		t.Errorf("expected 'Sync triggered' message, got: %s", rec.Body.String())
+	}
+}
+
+// makeEvent constructs a GitHubPushEvent for testing.
+func makeEvent(fullName, cloneURL, sshURL, ref string) GitHubPushEvent {
+	var e GitHubPushEvent
+	e.Ref = ref
+	e.After = "abc123"
+	e.Repository.FullName = fullName
+	e.Repository.CloneURL = cloneURL
+	e.Repository.SSHURL = sshURL
+	return e
 }
