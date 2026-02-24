@@ -81,7 +81,7 @@ func setupTestConfig(t *testing.T) (*config.Config, string) {
 	}
 
 	cfg := &config.Config{
-		Repo: config.RepoConfig{
+		Repository: &config.RepoSpec{
 			URL:    "https://github.com/test/repo.git",
 			Ref:    "refs/heads/main",
 			Subdir: "",

@@ -2,21 +2,26 @@
 # Copy this file to ~/.config/quadsyncd/config.yaml and customize
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Single-repository mode (original, still fully supported)
+# Single-repository mode
+# Use `repository` when syncing from a single Git repository.
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Git repository configuration
-repo:
+repository:
   # Repository URL (supports SSH or HTTPS)
   url: "git@github.com:ORG/REPO.git"
   # Git ref to track (branch, tag, or commit)
   ref: "refs/heads/main"
-  # Subdirectory within the repo containing quadlet files
+  # Subdirectory within the repo containing quadlet files (optional)
   subdir: "quadlets"
+  # Per-repository authentication override (optional; falls back to global `auth`)
+  # auth:
+  #   ssh_key_file: "${HOME}/.ssh/repo_deploy_key"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Multi-repository mode (mutually exclusive with `repo` above)
-# Remove or comment out the `repo` block above when using `repositories`.
+# Multi-repository mode (mutually exclusive with `repository` above)
+# Use `repositories` when syncing from multiple Git repositories.
+# Remove or comment out the `repository` block above when using `repositories`.
 # ──────────────────────────────────────────────────────────────────────────────
 
 # repositories:
@@ -57,7 +62,7 @@ sync:
   # - all-managed: restart all units from managed quadlet files
   restart: "changed"
   # How to resolve same-path conflicts when multiple repos provide the same file
-  # (only relevant in multi-repo mode):
+  # (only relevant in multi-repo / `repositories` mode):
   # - prefer_highest_priority: choose the highest-priority repo and emit a warning
   # - fail: abort the sync and enumerate all conflicts
   # conflict_handling: "prefer_highest_priority"
