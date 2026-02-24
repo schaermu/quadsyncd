@@ -47,7 +47,7 @@ func TestLoadConfig_WithExplicitPath(t *testing.T) {
 	quadletDir := filepath.Join(tmpDir, "quadlets")
 	stateDir := filepath.Join(tmpDir, "state")
 
-	configContent := []byte(`repo:
+	configContent := []byte(`repository:
   url: "git@github.com:test/repo.git"
   ref: "refs/heads/main"
   subdir: "quadlets"

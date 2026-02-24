@@ -10,23 +10,31 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
+	"github.com/schaermu/quadsyncd/internal/multirepo"
 	"github.com/schaermu/quadsyncd/internal/quadlet"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
 )
 
+// GitClientFactory creates a git.Client for a given AuthConfig.
+// Used to produce per-repo clients when auth overrides are configured.
+type GitClientFactory func(auth config.AuthConfig) git.Client
+
 // Engine orchestrates the sync process
 type Engine struct {
-	cfg     *config.Config
-	git     git.Client
-	systemd systemduser.Systemd
-	logger  *slog.Logger
-	dryRun  bool
+	cfg        *config.Config
+	git        git.Client
+	gitFactory GitClientFactory
+	systemd    systemduser.Systemd
+	logger     *slog.Logger
+	dryRun     bool
 }
 
-// NewEngine creates a new sync engine
+// NewEngine creates a new sync engine using a single git client for all repos.
 func NewEngine(cfg *config.Config, gitClient git.Client, systemd systemduser.Systemd, logger *slog.Logger, dryRun bool) *Engine {
 	return &Engine{
 		cfg:     cfg,
@@ -37,11 +45,24 @@ func NewEngine(cfg *config.Config, gitClient git.Client, systemd systemduser.Sys
 	}
 }
 
+// NewEngineWithFactory creates a sync engine that uses a factory to produce
+// per-repo git clients (supports per-repo auth overrides in multi-repo mode).
+func NewEngineWithFactory(cfg *config.Config, factory GitClientFactory, systemd systemduser.Systemd, logger *slog.Logger, dryRun bool) *Engine {
+	return &Engine{
+		cfg:        cfg,
+		gitFactory: factory,
+		systemd:    systemd,
+		logger:     logger,
+		dryRun:     dryRun,
+	}
+}
+
 // Run executes the complete sync process
 func (e *Engine) Run(ctx context.Context) error {
+	repos := e.cfg.EffectiveRepositories()
+
 	e.logger.Info("starting sync",
-		"repo", e.cfg.Repo.URL,
-		"ref", e.cfg.Repo.Ref,
+		"repo_count", len(repos),
 		"dry_run", e.dryRun)
 
 	// Ensure state directory exists
@@ -49,13 +70,47 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
-	// Fetch repository
-	e.logger.Info("fetching repository", "dest", e.cfg.RepoDir())
-	commit, err := e.git.EnsureCheckout(ctx, e.cfg.Repo.URL, e.cfg.Repo.Ref, e.cfg.RepoDir())
+	// Load all repo states (fail-fast: if any repo fails, nothing is applied)
+	repoStates, err := e.loadAllRepoStates(ctx, repos)
 	if err != nil {
-		return fmt.Errorf("failed to checkout repository: %w", err)
+		return err
 	}
-	e.logger.Info("repository checked out", "commit", commit)
+
+	for _, rs := range repoStates {
+		e.logger.Info("repository loaded",
+			"repo", rs.Spec.URL,
+			"ref", rs.Spec.Ref,
+			"commit", rs.Commit,
+			"files", len(rs.Files))
+	}
+
+	// Merge repo states into effective state
+	conflictMode := e.cfg.Sync.ConflictHandling
+	if conflictMode == "" {
+		conflictMode = config.ConflictPreferHighestPriority
+	}
+	mergeResult, err := multirepo.Merge(repoStates, conflictMode)
+	if err != nil {
+		return fmt.Errorf("failed to merge repository states: %w", err)
+	}
+
+	// Warn on same-path conflicts in prefer mode
+	for _, c := range mergeResult.Conflicts {
+		loserRepos := make([]string, len(c.Losers))
+		for i, l := range c.Losers {
+			loserRepos[i] = fmt.Sprintf("%s@%s", l.SourceRepo, l.SourceRef)
+		}
+		e.logger.Warn("same-path conflict resolved by priority",
+			"path", c.MergeKey,
+			"winner_repo", c.Winner.SourceRepo,
+			"winner_ref", c.Winner.SourceRef,
+			"losers", strings.Join(loserRepos, ", "),
+			"remediation", "adjust priorities or remove duplicate definitions")
+	}
+
+	e.logger.Info("merge complete",
+		"total_files", len(mergeResult.Items),
+		"conflicts", len(mergeResult.Conflicts))
 
 	// Load previous state
 	prevState, err := e.loadState()
@@ -64,19 +119,17 @@ func (e *Engine) Run(ctx context.Context) error {
 		prevState = &State{ManagedFiles: make(map[string]ManagedFile)}
 	}
 
-	// Build current desired state
-	plan, err := e.buildPlan(prevState)
+	// Build sync plan from effective items
+	plan, err := e.buildPlanFromEffective(prevState, mergeResult.Items)
 	if err != nil {
 		return fmt.Errorf("failed to build sync plan: %w", err)
 	}
 
-	// Log plan
 	e.logger.Info("sync plan",
 		"add", len(plan.Add),
 		"update", len(plan.Update),
 		"delete", len(plan.Delete))
 
-	// check for dry-run mode
 	if e.dryRun {
 		e.logPlanDetails(plan)
 		e.logger.Info("dry-run complete, no changes applied")
@@ -101,7 +154,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	// Save new state
-	newState := e.buildState(prevState, plan, commit)
+	newState := e.buildStateFromEffective(prevState, plan, repoStates)
 	if err := e.saveState(newState); err != nil {
 		return fmt.Errorf("failed to save state: %w", err)
 	}
@@ -115,89 +168,102 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Handle restarts based on policy
 	if err := e.handleRestarts(ctx, plan, newState); err != nil {
 		e.logger.Warn("restart operations had issues", "error", err)
-		// Don't fail the entire sync for restart issues
 	}
 
 	e.logger.Info("sync completed successfully")
 	return nil
 }
 
-// buildPlan computes the diff between desired and current state
-func (e *Engine) buildPlan(prevState *State) (*Plan, error) {
+// loadAllRepoStates loads all repositories fail-fast.
+// If any repo fails to load, the function returns immediately.
+func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec) ([]multirepo.RepoState, error) {
+	states := make([]multirepo.RepoState, 0, len(repos))
+
+	for _, spec := range repos {
+		var gitClient git.Client
+		if e.gitFactory != nil {
+			gitClient = e.gitFactory(e.cfg.AuthForSpec(spec))
+		} else {
+			gitClient = e.git
+		}
+
+		repoDir := e.cfg.RepoDirForSpec(spec)
+		srcDir := e.cfg.QuadletSourceDirForSpec(spec)
+
+		e.logger.Info("fetching repository", "repo", spec.URL, "ref", spec.Ref, "dest", repoDir)
+
+		rs, err := multirepo.LoadRepoState(ctx, spec, repoDir, srcDir, gitClient)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, rs)
+	}
+
+	return states, nil
+}
+
+// buildPlanFromEffective computes the diff between the effective items (from
+// multi-repo merge) and the previously managed state.
+func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.EffectiveItem) (*Plan, error) {
 	plan := &Plan{
 		Add:    make([]FileOp, 0),
 		Update: make([]FileOp, 0),
 		Delete: make([]FileOp, 0),
 	}
 
-	// Discover all files in the source directory (quadlet files and companions)
-	sourceFiles, err := quadlet.DiscoverAllFiles(e.cfg.QuadletSourceDir())
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover source files: %w", err)
+	// Build map of desired dest paths
+	desiredFiles := make(map[string]multirepo.EffectiveItem)
+	for _, item := range items {
+		destPath := filepath.Join(e.cfg.Paths.QuadletDir, filepath.FromSlash(item.MergeKey))
+		desiredFiles[destPath] = item
 	}
 
-	e.logger.Info("discovered source files", "count", len(sourceFiles))
-
-	// Build map of current desired files
-	desiredFiles := make(map[string]string) // destPath -> sourcePath
-	for _, srcPath := range sourceFiles {
-		relPath, err := quadlet.RelativePath(e.cfg.QuadletSourceDir(), srcPath)
+	// Compute add / update
+	for destPath, item := range desiredFiles {
+		hash, err := fileHash(item.AbsPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compute relative path: %w", err)
-		}
-
-		destPath := filepath.Join(e.cfg.Paths.QuadletDir, relPath)
-		desiredFiles[destPath] = srcPath
-	}
-
-	// Compute operations
-	for destPath, srcPath := range desiredFiles {
-		hash, err := fileHash(srcPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute hash for %s: %w", srcPath, err)
+			return nil, fmt.Errorf("failed to compute hash for %s: %w", item.AbsPath, err)
 		}
 
 		prev, exists := prevState.ManagedFiles[destPath]
-		if !exists {
-			// New file
-			plan.Add = append(plan.Add, FileOp{
-				SourcePath: srcPath,
-				DestPath:   destPath,
-				Hash:       hash,
-			})
-		} else if prev.Hash != hash {
-			// File changed
-			plan.Update = append(plan.Update, FileOp{
-				SourcePath: srcPath,
-				DestPath:   destPath,
-				Hash:       hash,
-			})
+		op := FileOp{
+			SourcePath: item.AbsPath,
+			DestPath:   destPath,
+			Hash:       hash,
+			SourceRepo: item.SourceRepo,
+			SourceRef:  item.SourceRef,
+			SourceSHA:  item.SourceSHA,
 		}
-		// else: unchanged, no action needed
+		if !exists {
+			plan.Add = append(plan.Add, op)
+		} else if prev.Hash != hash {
+			plan.Update = append(plan.Update, op)
+		}
 	}
 
-	// Find files to delete (if prune is enabled)
+	// Compute deletes (if prune enabled)
 	if e.cfg.Sync.Prune {
 		for destPath := range prevState.ManagedFiles {
 			if _, exists := desiredFiles[destPath]; !exists {
-				plan.Delete = append(plan.Delete, FileOp{
-					DestPath: destPath,
-				})
+				plan.Delete = append(plan.Delete, FileOp{DestPath: destPath})
 			}
 		}
 	}
+
+	// Sort for deterministic output
+	sort.Slice(plan.Add, func(i, j int) bool { return plan.Add[i].DestPath < plan.Add[j].DestPath })
+	sort.Slice(plan.Update, func(i, j int) bool { return plan.Update[i].DestPath < plan.Update[j].DestPath })
+	sort.Slice(plan.Delete, func(i, j int) bool { return plan.Delete[i].DestPath < plan.Delete[j].DestPath })
 
 	return plan, nil
 }
 
 // applyPlan executes the sync plan
 func (e *Engine) applyPlan(plan *Plan) error {
-	// Ensure destination directory exists
 	if err := os.MkdirAll(e.cfg.Paths.QuadletDir, 0755); err != nil {
 		return fmt.Errorf("failed to create quadlet directory: %w", err)
 	}
 
-	// Add new files
 	for _, op := range plan.Add {
 		e.logger.Info("adding file", "dest", op.DestPath)
 		if err := e.copyFile(op.SourcePath, op.DestPath); err != nil {
@@ -205,7 +271,6 @@ func (e *Engine) applyPlan(plan *Plan) error {
 		}
 	}
 
-	// Update existing files
 	for _, op := range plan.Update {
 		e.logger.Info("updating file", "dest", op.DestPath)
 		if err := e.copyFile(op.SourcePath, op.DestPath); err != nil {
@@ -213,7 +278,6 @@ func (e *Engine) applyPlan(plan *Plan) error {
 		}
 	}
 
-	// Delete removed files
 	for _, op := range plan.Delete {
 		e.logger.Info("deleting file", "dest", op.DestPath)
 		if err := os.Remove(op.DestPath); err != nil && !os.IsNotExist(err) {
@@ -226,12 +290,10 @@ func (e *Engine) applyPlan(plan *Plan) error {
 
 // copyFile copies a file from src to dst with atomic write
 func (e *Engine) copyFile(src, dst string) error {
-	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
 
-	// Open source
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -240,7 +302,6 @@ func (e *Engine) copyFile(src, dst string) error {
 		_ = srcFile.Close()
 	}()
 
-	// Create temp file in destination directory
 	tmpFile, err := os.CreateTemp(filepath.Dir(dst), ".quadsyncd-tmp-*")
 	if err != nil {
 		return err
@@ -248,38 +309,29 @@ func (e *Engine) copyFile(src, dst string) error {
 	tmpPath := tmpFile.Name()
 	defer func() {
 		_ = os.Remove(tmpPath)
-	}() // cleanup on error
+	}()
 
-	// Copy content
 	if _, err := io.Copy(tmpFile, srcFile); err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
 
-	// Get source permissions
 	srcInfo, err := srcFile.Stat()
 	if err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
 
-	// Set permissions on temp file
 	if err := tmpFile.Chmod(srcInfo.Mode()); err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
 
-	// Close temp file
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}
 
-	// Atomic rename
-	if err := os.Rename(tmpPath, dst); err != nil {
-		return err
-	}
-
-	return nil
+	return os.Rename(tmpPath, dst)
 }
 
 // handleRestarts restarts units based on the configured policy
@@ -290,7 +342,6 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan, state *State) e
 		return nil
 
 	case config.RestartChanged:
-		// Restart only units affected by changes
 		units := e.affectedUnits(plan)
 		if len(units) == 0 {
 			e.logger.Info("no units affected by changes")
@@ -300,7 +351,6 @@ func (e *Engine) handleRestarts(ctx context.Context, plan *Plan, state *State) e
 		return e.systemd.TryRestartUnits(ctx, units)
 
 	case config.RestartAllManaged:
-		// Restart all managed units
 		units := e.allManagedUnits(state)
 		if len(units) == 0 {
 			e.logger.Info("no managed units to restart")
@@ -339,8 +389,7 @@ func (e *Engine) allManagedUnits(state *State) []string {
 	return result
 }
 
-// quadletUnitsFromOps extracts unique systemd unit names from file operations,
-// considering only quadlet files (companion files do not generate units).
+// quadletUnitsFromOps extracts unique systemd unit names from file operations.
 func quadletUnitsFromOps(ops []FileOp) []string {
 	units := make(map[string]bool)
 	for _, op := range ops {
@@ -369,16 +418,24 @@ func (e *Engine) logPlanDetails(plan *Plan) {
 	}
 }
 
-// buildState creates a new State from the applied plan
-func (e *Engine) buildState(prevState *State, plan *Plan, commit string) *State {
+// buildStateFromEffective creates a new State from the applied plan with provenance.
+func (e *Engine) buildStateFromEffective(prevState *State, plan *Plan, repoStates []multirepo.RepoState) *State {
 	state := &State{
-		Commit:       commit,
+		Revisions:    make(map[string]string),
 		ManagedFiles: make(map[string]ManagedFile),
 	}
 
+	for _, rs := range repoStates {
+		state.Revisions[rs.Spec.URL] = rs.Commit
+	}
+	// For single-repo backward compat, also set the top-level Commit field.
+	if len(repoStates) == 1 {
+		state.Commit = repoStates[0].Commit
+	}
+
 	if prevState != nil {
-		for destPath, managed := range prevState.ManagedFiles {
-			state.ManagedFiles[destPath] = managed
+		for k, v := range prevState.ManagedFiles {
+			state.ManagedFiles[k] = v
 		}
 	}
 
@@ -387,10 +444,21 @@ func (e *Engine) buildState(prevState *State, plan *Plan, commit string) *State 
 	}
 
 	for _, op := range append(plan.Add, plan.Update...) {
-		relPath, _ := quadlet.RelativePath(e.cfg.QuadletSourceDir(), op.SourcePath)
+		relPath, err := filepath.Rel(e.cfg.Paths.QuadletDir, op.DestPath)
+		if err != nil {
+			e.logger.Error("failed to compute relative path for managed file",
+				"quadletDir", e.cfg.Paths.QuadletDir,
+				"destPath", op.DestPath,
+				"error", err,
+			)
+			relPath = op.DestPath
+		}
 		state.ManagedFiles[op.DestPath] = ManagedFile{
-			SourcePath: relPath,
+			SourcePath: filepath.ToSlash(relPath),
 			Hash:       op.Hash,
+			SourceRepo: op.SourceRepo,
+			SourceRef:  op.SourceRef,
+			SourceSHA:  op.SourceSHA,
 		}
 	}
 
