@@ -145,11 +145,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create dependencies
-	gitClient := git.NewShellClient(cfg.Auth.SSHKeyFile, cfg.Auth.HTTPSTokenFile)
+	gitFactory := func(auth config.AuthConfig) git.Client {
+		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile)
+	}
 	systemdClient := systemduser.NewClient()
 
 	// Create webhook server
-	server, err := webhook.NewServer(cfg, gitClient, systemdClient, logger)
+	server, err := webhook.NewServer(cfg, gitFactory, systemdClient, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create webhook server: %w", err)
 	}

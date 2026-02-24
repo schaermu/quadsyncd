@@ -28,13 +28,18 @@ type GitHubPushEvent struct {
 	After      string `json:"after"`
 	Repository struct {
 		FullName string `json:"full_name"`
+		CloneURL string `json:"clone_url"`
+		SSHURL   string `json:"ssh_url"`
 	} `json:"repository"`
 }
+
+// GitClientFactory creates a git.Client for a given AuthConfig.
+type GitClientFactory func(auth config.AuthConfig) git.Client
 
 // Server implements the webhook HTTP server
 type Server struct {
 	cfg         *config.Config
-	git         git.Client
+	gitFactory  GitClientFactory
 	systemd     systemduser.Systemd
 	logger      *slog.Logger
 	secret      []byte
@@ -53,7 +58,7 @@ type debouncer struct {
 }
 
 // NewServer creates a new webhook server
-func NewServer(cfg *config.Config, gitClient git.Client, systemd systemduser.Systemd, logger *slog.Logger) (*Server, error) {
+func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, logger *slog.Logger) (*Server, error) {
 	// Load webhook secret from file
 	secret, err := os.ReadFile(cfg.Serve.GitHubWebhookSecretFile)
 	if err != nil {
@@ -64,11 +69,11 @@ func NewServer(cfg *config.Config, gitClient git.Client, systemd systemduser.Sys
 	secret = []byte(strings.TrimSpace(string(secret)))
 
 	s := &Server{
-		cfg:     cfg,
-		git:     gitClient,
-		systemd: systemd,
-		logger:  logger,
-		secret:  secret,
+		cfg:        cfg,
+		gitFactory: gitFactory,
+		systemd:    systemd,
+		logger:     logger,
+		secret:     secret,
 	}
 
 	// Initialize debouncer with 2 second delay
@@ -186,11 +191,21 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if ref is allowed
+	// Check if ref is allowed (global filter)
 	if !s.isRefAllowed(event.Ref) {
 		s.logger.Info("ignoring disallowed ref", "ref", event.Ref)
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "Ref not configured for sync\n")
+		return
+	}
+
+	// Check if the push matches a configured repository and tracked ref
+	if !s.matchesConfiguredRepo(event) {
+		s.logger.Info("ignoring webhook for unconfigured repository/ref",
+			"repo", event.Repository.FullName,
+			"ref", event.Ref)
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "Repository/ref not configured for sync\n")
 		return
 	}
 
@@ -240,6 +255,71 @@ func (s *Server) isRefAllowed(ref string) bool {
 	return len(s.cfg.Serve.AllowedRefs) == 0 || sliceContains(s.cfg.Serve.AllowedRefs, ref)
 }
 
+// matchesConfiguredRepo checks if the push event matches at least one configured
+// repository (by URL) with a matching tracked ref. This ensures that only pushes
+// to refs actually being synced trigger a sync operation.
+func (s *Server) matchesConfiguredRepo(event GitHubPushEvent) bool {
+	repos := s.cfg.EffectiveRepositories()
+	for _, spec := range repos {
+		if repoURLMatchesEvent(spec.URL, event) && spec.Ref == event.Ref {
+			return true
+		}
+	}
+	return false
+}
+
+// repoURLMatchesEvent reports whether a configured repo URL corresponds to the
+// repository that sent the webhook event. It compares the normalised full name
+// (owner/repo) extracted from the configured URL against the event's FullName,
+// CloneURL and SSHURL fields.
+func repoURLMatchesEvent(cfgURL string, event GitHubPushEvent) bool {
+	cfgName := repoFullNameFromURL(cfgURL)
+	if cfgName == "" {
+		return false
+	}
+	if cfgName == event.Repository.FullName {
+		return true
+	}
+	if event.Repository.CloneURL != "" && cfgName == repoFullNameFromURL(event.Repository.CloneURL) {
+		return true
+	}
+	if event.Repository.SSHURL != "" && cfgName == repoFullNameFromURL(event.Repository.SSHURL) {
+		return true
+	}
+	return false
+}
+
+// repoFullNameFromURL extracts the "owner/repo" path from a Git remote URL.
+// It supports HTTPS, SSH scheme, and SSH shorthand (git@host:owner/repo) URLs.
+func repoFullNameFromURL(rawURL string) string {
+	// Handle SSH shorthand: git@github.com:org/repo.git
+	if strings.HasPrefix(rawURL, "git@") {
+		if idx := strings.Index(rawURL, ":"); idx >= 0 {
+			return strings.TrimSuffix(rawURL[idx+1:], ".git")
+		}
+		return ""
+	}
+
+	// Handle scheme-based URLs (https://, ssh://, http://)
+	withoutScheme := rawURL
+	if idx := strings.Index(rawURL, "://"); idx >= 0 {
+		withoutScheme = rawURL[idx+3:]
+	}
+
+	// Remove user info (e.g. git@ in ssh://git@host/path)
+	if at := strings.Index(withoutScheme, "@"); at >= 0 {
+		withoutScheme = withoutScheme[at+1:]
+	}
+
+	// Skip host, return path
+	if slash := strings.Index(withoutScheme, "/"); slash >= 0 {
+		path := withoutScheme[slash+1:]
+		return strings.TrimSuffix(path, ".git")
+	}
+
+	return ""
+}
+
 // sliceContains reports whether s is present in the slice.
 func sliceContains(slice []string, s string) bool {
 	for _, v := range slice {
@@ -268,7 +348,7 @@ func (s *Server) performSync(ctx context.Context) {
 	for {
 		s.logger.Info("performing sync operation")
 
-		engine := quadsyncd.NewEngine(s.cfg, s.git, s.systemd, s.logger, false)
+		engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, s.logger, false)
 		if err := engine.Run(runCtx); err != nil {
 			s.logger.Error("sync failed", "error", err)
 		} else {
