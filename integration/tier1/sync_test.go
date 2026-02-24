@@ -118,7 +118,7 @@ func resetState(t *testing.T, h *Harness, ctx context.Context) {
 func writeConfig(t *testing.T, h *Harness, ctx context.Context, restart string, prune bool) {
 	t.Helper()
 
-	config := fmt.Sprintf(`repo:
+	config := fmt.Sprintf(`repository:
   url: %s
   ref: main
   subdir: ""
