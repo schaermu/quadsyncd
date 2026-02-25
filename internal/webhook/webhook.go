@@ -103,7 +103,10 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 	s.performSync(ctx)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleWebhook)
+	mux.HandleFunc("/webhook", s.handleWebhook)
+	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/assets/", s.handleAssets)
+	mux.HandleFunc("/api/", s.handleAPI)
 
 	server := &http.Server{
 		Handler:           mux,
@@ -222,6 +225,47 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, "Sync triggered\n")
+}
+
+// handleRoot serves the Web UI SPA at the root path.
+// Currently returns a placeholder response; will serve the UI in future.
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	// Only handle exact root path and GET/HEAD methods
+	if r.URL.Path != "/" {
+		// Unknown paths should serve the UI entry for client-side routing
+		// For now, return 404; will serve UI index.html in future
+		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintf(w, "<!DOCTYPE html><html><head><title>quadsyncd</title></head><body><h1>quadsyncd Web UI</h1><p>Placeholder for Web UI MVP</p></body></html>\n")
+}
+
+// handleAssets serves static assets for the Web UI.
+// Currently returns a placeholder response; will serve actual assets in future.
+func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Placeholder: return 404 for all assets until Web UI is implemented
+	http.NotFound(w, r)
+}
+
+// handleAPI handles JSON API requests.
+// Currently returns HTTP 501 Not Implemented for all endpoints.
+func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	_, _ = fmt.Fprintf(w, `{"error":"API endpoint not implemented"}`+"\n")
 }
 
 // verifySignature verifies the GitHub webhook signature
