@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,8 @@ import (
 type mockGitClient struct {
 	checkoutCalled bool
 	shouldFail     bool
+	commit         string
+	repoSetup      func(destDir string)
 }
 
 func (m *mockGitClient) EnsureCheckout(ctx context.Context, url, ref, dest string) (string, error) {
@@ -33,7 +36,14 @@ func (m *mockGitClient) EnsureCheckout(ctx context.Context, url, ref, dest strin
 	if m.shouldFail {
 		return "", http.ErrServerClosed
 	}
-	return "abc123", nil
+	if m.repoSetup != nil {
+		m.repoSetup(dest)
+	}
+	commit := m.commit
+	if commit == "" {
+		commit = "abc123"
+	}
+	return commit, nil
 }
 
 // mockGitFactory returns a GitClientFactory that always returns the given mock.
@@ -1201,6 +1211,96 @@ func TestHandlePlan(t *testing.T) {
 		}
 		if !latestRun.DryRun {
 			t.Error("expected dry_run to be true for plan")
+		}
+	})
+
+	t.Run("POST /api/plan successful dry-run with plan.json", func(t *testing.T) {
+		// Create a new server with a mock that sets up a quadlet repo
+		mockGitWithRepo := &mockGitClient{
+			commit: "test-commit-sha",
+			repoSetup: func(destDir string) {
+				// Create a minimal quadlet structure
+				quadletSubdir := filepath.Join(destDir, cfg.Repository.Subdir)
+				if err := os.MkdirAll(quadletSubdir, 0755); err != nil {
+					t.Fatalf("failed to create quadlet subdir: %v", err)
+				}
+				// Write a sample .container file
+				containerFile := filepath.Join(quadletSubdir, "test-app.container")
+				content := `[Container]
+Image=docker.io/library/nginx:latest
+PublishPort=8080:80
+
+[Service]
+Restart=always
+`
+				if err := os.WriteFile(containerFile, []byte(content), 0644); err != nil {
+					t.Fatalf("failed to write quadlet file: %v", err)
+				}
+			},
+		}
+
+		serverWithRepo, err := NewServer(cfg, mockGitFactory(mockGitWithRepo), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+		if err != nil {
+			t.Fatalf("NewServer() failed: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		serverWithRepo.handlePlan(w, req)
+
+		// Should return 200 on successful plan
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+
+		// Response should be JSON with run_id and success status
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		runID, ok := resp["run_id"].(string)
+		if !ok || runID == "" {
+			t.Errorf("expected run_id in response, got %v", resp)
+		}
+
+		status, ok := resp["status"].(string)
+		if !ok || status != "success" {
+			t.Errorf("expected status 'success', got %v", resp)
+		}
+
+		// Verify plan.json was created and can be read
+		store := runstore.NewStore(cfg.Paths.StateDir, logger)
+		plan, err := store.ReadPlan(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("failed to read plan.json: %v", err)
+		}
+
+		// Validate plan structure
+		if len(plan.Ops) == 0 {
+			t.Error("expected at least one operation in plan")
+		}
+
+		// Verify we have an 'add' operation for the test-app.container
+		foundAdd := false
+		for _, op := range plan.Ops {
+			if op.Op == "add" && strings.Contains(op.Path, "test-app.container") {
+				foundAdd = true
+				if op.SourceRepo != cfg.Repository.URL {
+					t.Errorf("expected source_repo %s, got %s", cfg.Repository.URL, op.SourceRepo)
+				}
+				if op.SourceRef != cfg.Repository.Ref {
+					t.Errorf("expected source_ref %s, got %s", cfg.Repository.Ref, op.SourceRef)
+				}
+				if op.SourceSHA != "test-commit-sha" {
+					t.Errorf("expected source_sha 'test-commit-sha', got %s", op.SourceSHA)
+				}
+			}
+		}
+
+		if !foundAdd {
+			t.Error("expected to find 'add' operation for test-app.container in plan")
 		}
 	})
 

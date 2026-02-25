@@ -62,6 +62,17 @@ type debouncer struct {
 
 // NewServer creates a new webhook server
 func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, store *runstore.Store, logger *slog.Logger) (*Server, error) {
+	// Validate required parameters
+	if store == nil {
+		return nil, fmt.Errorf("runstore.Store cannot be nil")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("logger cannot be nil")
+	}
+	if systemd == nil {
+		return nil, fmt.Errorf("systemd client cannot be nil")
+	}
+
 	// Load webhook secret from file
 	secret, err := os.ReadFile(cfg.Serve.GitHubWebhookSecretFile)
 	if err != nil {
@@ -265,12 +276,54 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// convertSyncPlanToRunstorePlan converts a sync.Plan to runstore.Plan format.
+func convertSyncPlanToRunstorePlan(syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary) runstore.Plan {
+	ops := make([]runstore.PlanOp, 0, len(syncPlan.Add)+len(syncPlan.Update)+len(syncPlan.Delete))
+
+	// Convert Add operations
+	for _, op := range syncPlan.Add {
+		ops = append(ops, runstore.PlanOp{
+			Op:         "add",
+			Path:       op.DestPath,
+			SourceRepo: op.SourceRepo,
+			SourceRef:  op.SourceRef,
+			SourceSHA:  op.SourceSHA,
+		})
+	}
+
+	// Convert Update operations
+	for _, op := range syncPlan.Update {
+		ops = append(ops, runstore.PlanOp{
+			Op:         "update",
+			Path:       op.DestPath,
+			SourceRepo: op.SourceRepo,
+			SourceRef:  op.SourceRef,
+			SourceSHA:  op.SourceSHA,
+		})
+	}
+
+	// Convert Delete operations
+	for _, op := range syncPlan.Delete {
+		ops = append(ops, runstore.PlanOp{
+			Op:   "delete",
+			Path: op.DestPath,
+		})
+	}
+
+	return runstore.Plan{
+		Requested: runstore.PlanRequest{}, // UI-triggered plans don't specify a request scope
+		Conflicts: conflicts,
+		Ops:       ops,
+	}
+}
+
 // handlePlan handles UI-triggered plan execution (dry-run sync).
 // POST /api/plan triggers a plan operation that creates a run record with plan.json.
 func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Content-Type", "application/json")
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
 		return
 	}
 
@@ -290,7 +343,8 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.Create(ctx, meta); err != nil {
 		s.logger.Error("failed to create plan run record", "error", err)
 		w.Header().Set("Content-Type", "application/json")
-		http.Error(w, `{"error":"Failed to create plan record"}`, http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create plan record"})
 		return
 	}
 
@@ -353,6 +407,14 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 				},
 				Losers: losers,
 			}
+		}
+	}
+
+	// Persist plan.json for plan runs
+	if result != nil && result.Plan != nil {
+		planData := convertSyncPlanToRunstorePlan(result.Plan, meta.Conflicts)
+		if err := s.store.WritePlan(ctx, meta.ID, planData); err != nil {
+			logger.Error("failed to persist plan.json", "error", err)
 		}
 	}
 
@@ -546,12 +608,22 @@ func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.T
 		Conflicts: []runstore.ConflictSummary{},
 	}
 
+	// Try to create run record; if it fails, continue without instrumentation
+	runRecordCreated := false
 	if err := s.store.Create(ctx, meta); err != nil {
-		s.logger.Error("failed to create run record", "error", err)
-		// Continue with sync even if run record creation fails
-	} else {
-		s.logger.Info("created run record", "run_id", meta.ID)
+		s.logger.Error("failed to create run record, continuing without instrumentation", "error", err)
+		// Run sync without runstore instrumentation
+		engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, s.logger, false)
+		_, syncErr := engine.Run(ctx)
+		if syncErr != nil {
+			s.logger.Error("sync failed", "error", syncErr)
+		} else {
+			s.logger.Info("sync completed successfully")
+		}
+		return
 	}
+	runRecordCreated = true
+	s.logger.Info("created run record", "run_id", meta.ID)
 
 	// Create a tee logger that writes to both console and runstore
 	// Use the same level as the console logger
@@ -614,9 +686,11 @@ func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.T
 		}
 	}
 
-	// Update run metadata with final state
-	if err := s.store.Update(ctx, meta); err != nil {
-		logger.Error("failed to update run record", "error", err)
+	// Update run metadata with final state (only if we created the run record)
+	if runRecordCreated {
+		if err := s.store.Update(ctx, meta); err != nil {
+			logger.Error("failed to update run record", "error", err)
+		}
 	}
 }
 
