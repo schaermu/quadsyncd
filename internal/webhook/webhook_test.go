@@ -85,6 +85,19 @@ func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
 	return nil
 }
 
+func (m *mockSystemd) Show(ctx context.Context, unit string, properties []string) (map[string]string, error) {
+	if m.shouldFail {
+		return nil, http.ErrServerClosed
+	}
+	// Return mock data for timer queries
+	return map[string]string{
+		"ActiveState":            "inactive",
+		"SubState":               "dead",
+		"UnitFileState":          "enabled",
+		"NextElapseUSecRealtime": "0",
+	}, nil
+}
+
 func setupTestConfig(t *testing.T) (*config.Config, string) {
 	t.Helper()
 
@@ -1996,15 +2009,15 @@ func TestHandleUnits(t *testing.T) {
 		// Create a mock state file
 		stateFile := filepath.Join(cfg.Paths.StateDir, "state.json")
 		stateData := `{
-			"managed_files": [
-				{
-					"path": "/path/to/test.container",
-					"unit": "test.service",
+			"managed_files": {
+				"/path/to/test.container": {
+					"source_path": "test.container",
+					"hash": "abc123",
 					"source_repo": "https://github.com/test/repo",
 					"source_ref": "refs/heads/main",
 					"source_sha": "abc123"
 				}
-			]
+			}
 		}`
 		if err := os.WriteFile(stateFile, []byte(stateData), 0644); err != nil {
 			t.Fatalf("failed to write state file: %v", err)

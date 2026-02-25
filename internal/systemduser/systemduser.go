@@ -21,6 +21,8 @@ type Systemd interface {
 	// validate that the quadlet files can be converted into systemd units.
 	// quadletDir is the directory containing the quadlet files to validate.
 	ValidateQuadlets(ctx context.Context, quadletDir string) error
+	// Show returns the specified properties for a unit using systemctl show
+	Show(ctx context.Context, unit string, properties []string) (map[string]string, error)
 }
 
 // Client implements Systemd by shelling out to systemctl --user
@@ -140,4 +142,29 @@ func (c *Client) GetUnitStatus(ctx context.Context, unit string) (string, error)
 	}
 
 	return status, nil
+}
+
+// Show returns the specified properties for a unit using systemctl show
+func (c *Client) Show(ctx context.Context, unit string, properties []string) (map[string]string, error) {
+	args := []string{"--user", "show", unit}
+	if len(properties) > 0 {
+		args = append(args, "--property="+strings.Join(properties, ","))
+	}
+
+	cmd := exec.CommandContext(ctx, "systemctl", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("systemctl show failed: %w", err)
+	}
+
+	// Parse output into map
+	result := make(map[string]string)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+
+	return result, nil
 }

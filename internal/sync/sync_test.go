@@ -64,6 +64,16 @@ func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
 	return m.validateErr
 }
 
+func (m *mockSystemd) Show(_ context.Context, unit string, properties []string) (map[string]string, error) {
+	// Return mock data for timer queries
+	return map[string]string{
+		"ActiveState":            "inactive",
+		"SubState":               "dead",
+		"UnitFileState":          "enabled",
+		"NextElapseUSecRealtime": "0",
+	}, nil
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }

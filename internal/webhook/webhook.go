@@ -12,8 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +21,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/logging"
+	"github.com/schaermu/quadsyncd/internal/quadlet"
 	"github.com/schaermu/quadsyncd/internal/runstore"
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
@@ -594,9 +595,9 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	limit := 50 // default
 	if limitStr := query.Get("limit"); limitStr != "" {
-		if parsedLimit, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && parsedLimit == 1 {
-			if limit <= 0 || limit > 100 {
-				limit = 50
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
+			if parsedLimit > 0 && parsedLimit <= 100 {
+				limit = parsedLimit
 			}
 		}
 	}
@@ -745,9 +746,9 @@ func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request) {
 
 	limit := 100 // default
 	if limitStr := query.Get("limit"); limitStr != "" {
-		if parsedLimit, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && parsedLimit == 1 {
-			if limit <= 0 || limit > 1000 {
-				limit = 100
+		if parsedLimit, err := strconv.Atoi(limitStr); err == nil {
+			if parsedLimit > 0 && parsedLimit <= 1000 {
+				limit = parsedLimit
 			}
 		}
 	}
@@ -765,7 +766,22 @@ func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request) {
 	// Parse cursor (line offset)
 	cursorOffset := 0
 	if cursorStr != "" {
-		_, _ = fmt.Sscanf(cursorStr, "%d", &cursorOffset)
+		offset, err := strconv.Atoi(cursorStr)
+		if err != nil {
+			s.logger.Warn("invalid cursor offset", "cursor", cursorStr, "error", err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid cursor value"})
+			return
+		}
+		if offset < 0 {
+			s.logger.Warn("negative cursor offset", "cursor", cursorStr, "offset", offset)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid cursor value"})
+			return
+		}
+		cursorOffset = offset
 	}
 
 	// Read logs
@@ -948,9 +964,9 @@ func (s *Server) handleUnits(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var state struct {
-		ManagedFiles []struct {
-			Path       string `json:"path"`
-			Unit       string `json:"unit"`
+		ManagedFiles map[string]struct {
+			SourcePath string `json:"source_path"`
+			Hash       string `json:"hash"`
 			SourceRepo string `json:"source_repo"`
 			SourceRef  string `json:"source_ref"`
 			SourceSHA  string `json:"source_sha"`
@@ -965,12 +981,12 @@ func (s *Server) handleUnits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build unit list
+	// Build unit list from map
 	units := make([]map[string]interface{}, 0, len(state.ManagedFiles))
-	for _, file := range state.ManagedFiles {
+	for destPath, file := range state.ManagedFiles {
 		unit := map[string]interface{}{
-			"name":        file.Unit,
-			"path":        file.Path,
+			"name":        quadlet.UnitNameFromQuadlet(destPath),
+			"path":        destPath,
 			"source_repo": file.SourceRepo,
 			"source_ref":  file.SourceRef,
 			"source_sha":  file.SourceSHA,
@@ -1013,23 +1029,18 @@ func (s *Server) handleTimer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Try to get timer status using systemctl show
-	cmd := exec.CommandContext(ctx, "systemctl", "--user", "show", timerUnit, "--property=ActiveState,SubState,UnitFileState,NextElapseUSecRealtime")
-	output, err := cmd.Output()
+	properties, err := s.systemd.Show(ctx, timerUnit, []string{
+		"ActiveState",
+		"SubState",
+		"UnitFileState",
+		"NextElapseUSecRealtime",
+	})
 	if err != nil {
 		// Timer not installed or not available
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(response)
 		return
-	}
-
-	// Parse output
-	lines := strings.Split(string(output), "\n")
-	properties := make(map[string]string)
-	for _, line := range lines {
-		if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
-			properties[parts[0]] = parts[1]
-		}
 	}
 
 	response["available"] = true
