@@ -18,6 +18,8 @@ import (
 
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
+	"github.com/schaermu/quadsyncd/internal/logging"
+	"github.com/schaermu/quadsyncd/internal/runstore"
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
 )
@@ -42,6 +44,7 @@ type Server struct {
 	gitFactory  GitClientFactory
 	systemd     systemduser.Systemd
 	logger      *slog.Logger
+	store       *runstore.Store
 	secret      []byte
 	syncMu      sync.Mutex // guards syncRunning and syncPending
 	syncRunning bool       // whether a sync is currently in progress
@@ -58,7 +61,7 @@ type debouncer struct {
 }
 
 // NewServer creates a new webhook server
-func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, logger *slog.Logger) (*Server, error) {
+func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, store *runstore.Store, logger *slog.Logger) (*Server, error) {
 	// Load webhook secret from file
 	secret, err := os.ReadFile(cfg.Serve.GitHubWebhookSecretFile)
 	if err != nil {
@@ -73,6 +76,7 @@ func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemdu
 		gitFactory: gitFactory,
 		systemd:    systemd,
 		logger:     logger,
+		store:      store,
 		secret:     secret,
 	}
 
@@ -100,7 +104,7 @@ func (s *Server) Start(ctx context.Context) error {
 // performing an initial sync first. This supports systemd socket activation.
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
 	s.logger.Info("performing initial sync before starting webhook server")
-	s.performSync(ctx)
+	s.performSync(ctx, runstore.TriggerStartup)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook", s.handleWebhook)
@@ -220,7 +224,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger debounced sync
 	s.debounce.trigger(func() {
-		s.performSync(context.Background())
+		s.performSync(context.Background(), runstore.TriggerWebhook)
 	})
 
 	w.WriteHeader(http.StatusOK)
@@ -374,10 +378,10 @@ func sliceContains(slice []string, s string) bool {
 	return false
 }
 
-// performSync executes the sync operation with single-flight semantics.
+// performSync executes the sync operation with single-flight semantics and runstore instrumentation.
 // If a sync is already in progress, at most one additional run is queued;
 // further concurrent requests are dropped to avoid unbounded goroutine pile-up.
-func (s *Server) performSync(ctx context.Context) {
+func (s *Server) performSync(ctx context.Context, trigger runstore.TriggerSource) {
 	s.syncMu.Lock()
 	if s.syncRunning {
 		s.syncPending = true
@@ -390,15 +394,7 @@ func (s *Server) performSync(ctx context.Context) {
 
 	runCtx := ctx
 	for {
-		s.logger.Info("performing sync operation")
-
-		engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, s.logger, false)
-		_, err := engine.Run(runCtx)
-		if err != nil {
-			s.logger.Error("sync failed", "error", err)
-		} else {
-			s.logger.Info("sync completed successfully")
-		}
+		s.executeInstrumentedSync(runCtx, trigger)
 
 		// Atomically check whether another sync was requested while we were
 		// running. If not, release the running slot and stop; if yes, clear
@@ -418,6 +414,93 @@ func (s *Server) performSync(ctx context.Context) {
 		// already queued) does not abort the re-run.
 		runCtx = context.Background()
 		s.logger.Info("re-running sync due to pending request")
+	}
+}
+
+// executeInstrumentedSync performs a single sync with run record creation and logging.
+func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.TriggerSource) {
+	// Create initial run metadata
+	meta := &runstore.RunMeta{
+		Kind:      runstore.RunKindSync,
+		Trigger:   trigger,
+		StartedAt: time.Now().UTC(),
+		Status:    runstore.RunStatusRunning,
+		DryRun:    false,
+		Revisions: make(map[string]string),
+		Conflicts: []runstore.ConflictSummary{},
+	}
+
+	if err := s.store.Create(ctx, meta); err != nil {
+		s.logger.Error("failed to create run record", "error", err)
+		// Continue with sync even if run record creation fails
+	} else {
+		s.logger.Info("created run record", "run_id", meta.ID)
+	}
+
+	// Create a tee logger that writes to both console and runstore
+	// Use the same level as the console logger
+	var ndjsonLevel slog.Level = slog.LevelInfo
+	if leveler, ok := s.logger.Handler().(interface{ Level() slog.Level }); ok {
+		ndjsonLevel = leveler.Level()
+	}
+
+	ndjsonHandler := logging.NewNDJSONHandler(func(line []byte) error {
+		return s.store.AppendLog(ctx, meta.ID, line)
+	}, &logging.NDJSONHandlerOptions{
+		Level: ndjsonLevel,
+	})
+
+	teeHandler := logging.NewTeeHandler(s.logger.Handler(), ndjsonHandler)
+	logger := slog.New(teeHandler)
+
+	// Run sync with instrumented logger
+	logger.Info("performing sync operation")
+	engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, false)
+	result, syncErr := engine.Run(ctx)
+
+	// Finalize run metadata
+	endedAt := time.Now().UTC()
+	meta.EndedAt = &endedAt
+
+	if syncErr != nil {
+		meta.Status = runstore.RunStatusError
+		meta.Error = syncErr.Error()
+		logger.Error("sync failed", "error", syncErr)
+	} else {
+		meta.Status = runstore.RunStatusSuccess
+		logger.Info("sync completed successfully")
+	}
+
+	// Populate revisions and conflicts from result
+	if result != nil {
+		meta.Revisions = result.Revisions
+		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
+		for i, c := range result.Conflicts {
+			losers := make([]runstore.EffectiveItemSummary, len(c.Losers))
+			for j, l := range c.Losers {
+				losers[j] = runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: l.Repo,
+					SourceRef:  l.Ref,
+					SourceSHA:  l.SHA,
+				}
+			}
+			meta.Conflicts[i] = runstore.ConflictSummary{
+				MergeKey: c.MergeKey,
+				Winner: runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: c.WinnerRepo,
+					SourceRef:  c.WinnerRef,
+					SourceSHA:  c.WinnerSHA,
+				},
+				Losers: losers,
+			}
+		}
+	}
+
+	// Update run metadata with final state
+	if err := s.store.Update(ctx, meta); err != nil {
+		logger.Error("failed to update run record", "error", err)
 	}
 }
 
