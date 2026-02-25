@@ -3,6 +3,7 @@
 package runstore
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -140,6 +141,52 @@ func generateRunID() (string, error) {
 	), nil
 }
 
+// safeRunDir validates the run ID and returns the safe run directory path.
+// Rejects path traversal sequences, absolute paths, and empty IDs.
+func (s *Store) safeRunDir(id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("run ID cannot be empty")
+	}
+	// filepath.Base returns "." for empty, "/" for root, and strips any path separators.
+	// If the result differs from the input, the ID contains path separators or traversal.
+	if filepath.Base(id) != id {
+		return "", fmt.Errorf("invalid run ID (path traversal detected): %s", id)
+	}
+	return filepath.Join(s.baseDir, id), nil
+}
+
+// validateArtifactName validates that an artifact name is a single path element
+// without separators or traversal sequences.
+func validateArtifactName(name string) error {
+	if name == "" {
+		return fmt.Errorf("artifact name cannot be empty")
+	}
+	if filepath.Base(name) != name {
+		return fmt.Errorf("invalid artifact name (path traversal detected): %s", name)
+	}
+	return nil
+}
+
+// parseRunIDTimestamp attempts to parse the timestamp from a run ID.
+// Run IDs follow the format: YYYYMMDD-HHMMSS-<hex>.
+// Returns the parsed time or an error if parsing fails.
+func parseRunIDTimestamp(id string) (time.Time, error) {
+	// Expected format: 20060102-150405-abcdef
+	parts := strings.Split(id, "-")
+	if len(parts) < 2 {
+		return time.Time{}, fmt.Errorf("invalid run ID format: %s", id)
+	}
+
+	// Combine date and time parts: YYYYMMDD + HHMMSS
+	timestampStr := parts[0] + parts[1]
+	t, err := time.Parse("20060102150405", timestampStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse timestamp from run ID %s: %w", id, err)
+	}
+
+	return t, nil
+}
+
 // Create initializes a new run directory and writes initial meta.json.
 func (s *Store) Create(ctx context.Context, meta *RunMeta) error {
 	if meta.ID == "" {
@@ -150,7 +197,11 @@ func (s *Store) Create(ctx context.Context, meta *RunMeta) error {
 		meta.ID = id
 	}
 
-	runDir := filepath.Join(s.baseDir, meta.ID)
+	runDir, err := s.safeRunDir(meta.ID)
+	if err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(runDir, 0755); err != nil {
 		return fmt.Errorf("failed to create run directory: %w", err)
 	}
@@ -165,7 +216,20 @@ func (s *Store) Create(ctx context.Context, meta *RunMeta) error {
 
 // Update writes the current state of meta to meta.json (atomic).
 func (s *Store) Update(ctx context.Context, meta *RunMeta) error {
-	runDir := filepath.Join(s.baseDir, meta.ID)
+	runDir, err := s.safeRunDir(meta.ID)
+	if err != nil {
+		return err
+	}
+
+	// Check that the run exists before updating
+	metaPath := filepath.Join(runDir, "meta.json")
+	if _, err := os.Stat(metaPath); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("run not found: %s", meta.ID)
+		}
+		return fmt.Errorf("failed to stat meta.json: %w", err)
+	}
+
 	if err := s.writeMetaAtomic(runDir, *meta); err != nil {
 		return fmt.Errorf("failed to update meta.json: %w", err)
 	}
@@ -174,7 +238,11 @@ func (s *Store) Update(ctx context.Context, meta *RunMeta) error {
 
 // Get retrieves the metadata for a run.
 func (s *Store) Get(ctx context.Context, id string) (*RunMeta, error) {
-	runDir := filepath.Join(s.baseDir, id)
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return nil, err
+	}
+
 	metaPath := filepath.Join(runDir, "meta.json")
 
 	data, err := os.ReadFile(metaPath)
@@ -225,15 +293,14 @@ func (s *Store) List(ctx context.Context) ([]RunMeta, error) {
 	return runs, nil
 }
 
-// AppendLog appends a JSON log line to log.ndjson.
-func (s *Store) AppendLog(ctx context.Context, id string, record map[string]interface{}) error {
-	runDir := filepath.Join(s.baseDir, id)
-	logPath := filepath.Join(runDir, "log.ndjson")
-
-	data, err := json.Marshal(record)
+// AppendLog appends a pre-encoded JSON line to log.ndjson.
+func (s *Store) AppendLog(ctx context.Context, id string, line []byte) (err error) {
+	runDir, err := s.safeRunDir(id)
 	if err != nil {
-		return fmt.Errorf("failed to marshal log record: %w", err)
+		return err
 	}
+
+	logPath := filepath.Join(runDir, "log.ndjson")
 
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -245,7 +312,8 @@ func (s *Store) AppendLog(ctx context.Context, id string, record map[string]inte
 		}
 	}()
 
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	// Append line with newline
+	if _, err = f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("failed to write log record: %w", err)
 	}
 
@@ -255,28 +323,45 @@ func (s *Store) AppendLog(ctx context.Context, id string, record map[string]inte
 // ReadLog reads all log records from log.ndjson.
 // Returns an empty slice if the log file doesn't exist.
 func (s *Store) ReadLog(ctx context.Context, id string) ([]map[string]interface{}, error) {
-	runDir := filepath.Join(s.baseDir, id)
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return nil, err
+	}
+
 	logPath := filepath.Join(runDir, "log.ndjson")
 
-	data, err := os.ReadFile(logPath)
+	f, err := os.Open(logPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []map[string]interface{}{}, nil
 		}
-		return nil, fmt.Errorf("failed to read log file: %w", err)
+		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			s.logger.Warn("failed to close log file", "path", logPath, "error", cerr)
+		}
+	}()
 
 	var records []map[string]interface{}
-	for _, line := range strings.Split(string(data), "\n") {
-		if len(strings.TrimSpace(line)) == 0 {
+	scanner := bufio.NewScanner(f)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
 			continue
 		}
+
 		var record map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
+		if err := json.Unmarshal(line, &record); err != nil {
 			s.logger.Warn("failed to parse log line (skipping)", "id", id, "error", err)
 			continue
 		}
 		records = append(records, record)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan log file: %w", err)
 	}
 
 	return records, nil
@@ -284,7 +369,11 @@ func (s *Store) ReadLog(ctx context.Context, id string) ([]map[string]interface{
 
 // WritePlan writes plan.json and optional artifacts.
 func (s *Store) WritePlan(ctx context.Context, id string, plan Plan) error {
-	runDir := filepath.Join(s.baseDir, id)
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return err
+	}
+
 	planPath := filepath.Join(runDir, "plan.json")
 
 	data, err := json.MarshalIndent(plan, "", "  ")
@@ -302,7 +391,11 @@ func (s *Store) WritePlan(ctx context.Context, id string, plan Plan) error {
 // ReadPlan reads plan.json for a run.
 // Returns an error if the plan file doesn't exist.
 func (s *Store) ReadPlan(ctx context.Context, id string) (*Plan, error) {
-	runDir := filepath.Join(s.baseDir, id)
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return nil, err
+	}
+
 	planPath := filepath.Join(runDir, "plan.json")
 
 	data, err := os.ReadFile(planPath)
@@ -323,7 +416,15 @@ func (s *Store) ReadPlan(ctx context.Context, id string) (*Plan, error) {
 
 // WriteArtifact writes a plan artifact (before/after quadlet content).
 func (s *Store) WriteArtifact(ctx context.Context, id, name string, content []byte) error {
-	runDir := filepath.Join(s.baseDir, id)
+	if err := validateArtifactName(name); err != nil {
+		return err
+	}
+
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return err
+	}
+
 	artifactsDir := filepath.Join(runDir, "artifacts")
 
 	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
@@ -340,7 +441,15 @@ func (s *Store) WriteArtifact(ctx context.Context, id, name string, content []by
 
 // ReadArtifact reads a plan artifact.
 func (s *Store) ReadArtifact(ctx context.Context, id, name string) ([]byte, error) {
-	runDir := filepath.Join(s.baseDir, id)
+	if err := validateArtifactName(name); err != nil {
+		return nil, err
+	}
+
+	runDir, err := s.safeRunDir(id)
+	if err != nil {
+		return nil, err
+	}
+
 	artifactPath := filepath.Join(runDir, "artifacts", name)
 
 	data, err := os.ReadFile(artifactPath)
@@ -355,25 +464,62 @@ func (s *Store) ReadArtifact(ctx context.Context, id, name string) ([]byte, erro
 }
 
 // Prune removes runs older than the given duration.
+// Uses a three-level fallback for determining run age:
+// 1. meta.json StartedAt (if readable)
+// 2. Timestamp parsed from run ID (YYYYMMDD-HHMMSS format)
+// 3. Directory modification time
 func (s *Store) Prune(ctx context.Context, maxAge time.Duration) error {
-	runs, err := s.List(ctx)
+	entries, err := os.ReadDir(s.baseDir)
 	if err != nil {
-		return fmt.Errorf("failed to list runs: %w", err)
+		if os.IsNotExist(err) {
+			return nil // Nothing to prune
+		}
+		return fmt.Errorf("failed to read runstore base dir: %w", err)
 	}
 
 	cutoff := time.Now().Add(-maxAge)
 	var pruned int
 
-	for _, run := range runs {
-		if run.StartedAt.Before(cutoff) {
-			runDir := filepath.Join(s.baseDir, run.ID)
-			if err := os.RemoveAll(runDir); err != nil {
-				s.logger.Warn("failed to prune run", "id", run.ID, "error", err)
-				continue
-			}
-			s.logger.Debug("pruned run", "id", run.ID, "started_at", run.StartedAt)
-			pruned++
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
+
+		runID := entry.Name()
+		runDir := filepath.Join(s.baseDir, runID)
+
+		// Try to get run time from meta.json first
+		var refTime time.Time
+		meta, err := s.Get(ctx, runID)
+		if err == nil {
+			refTime = meta.StartedAt
+		} else {
+			// Fallback 1: Parse timestamp from run ID
+			if t, err := parseRunIDTimestamp(runID); err == nil {
+				refTime = t
+			} else {
+				// Fallback 2: Use directory modification time
+				info, err := entry.Info()
+				if err != nil {
+					s.logger.Warn("failed to stat run directory while pruning", "id", runID, "error", err)
+					continue
+				}
+				refTime = info.ModTime()
+			}
+		}
+
+		// Only prune if older than cutoff
+		if !refTime.Before(cutoff) {
+			continue
+		}
+
+		if err := os.RemoveAll(runDir); err != nil {
+			s.logger.Warn("failed to prune run", "id", runID, "error", err)
+			continue
+		}
+
+		s.logger.Debug("pruned run", "id", runID, "ref_time", refTime)
+		pruned++
 	}
 
 	if pruned > 0 {

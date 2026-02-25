@@ -2,6 +2,7 @@ package runstore
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -236,7 +237,12 @@ func TestStore_AppendLogAndReadLog(t *testing.T) {
 	}
 
 	for _, record := range records {
-		if err := store.AppendLog(ctx, meta.ID, record); err != nil {
+		// Marshal to JSON before appending
+		line, err := json.Marshal(record)
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		if err := store.AppendLog(ctx, meta.ID, line); err != nil {
 			t.Fatalf("AppendLog: %v", err)
 		}
 	}
@@ -581,6 +587,11 @@ func TestStore_Prune_PartialRuns(t *testing.T) {
 
 	if len(listed) != 0 {
 		t.Errorf("expected 0 runs after prune, got %d", len(listed))
+	}
+
+	// Verify malformed directory was actually removed
+	if _, err := os.Stat(malformedDir); !os.IsNotExist(err) {
+		t.Errorf("malformed directory still exists after prune: %s", malformedDir)
 	}
 }
 
