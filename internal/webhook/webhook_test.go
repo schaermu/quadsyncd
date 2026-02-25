@@ -371,7 +371,7 @@ func TestHandleWebhook_ValidRequest(t *testing.T) {
 		}
 	}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
@@ -399,7 +399,7 @@ func TestHandleWebhook_InvalidMethod(t *testing.T) {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/webhook", nil)
 	rec := httptest.NewRecorder()
 
 	server.handleWebhook(rec, req)
@@ -421,7 +421,7 @@ func TestHandleWebhook_InvalidContentType(t *testing.T) {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte("{}")))
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "text/plain")
 
 	rec := httptest.NewRecorder()
@@ -511,7 +511,7 @@ func TestHandleWebhook_DisallowedRef(t *testing.T) {
 		}
 	}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
@@ -859,7 +859,7 @@ func TestHandleWebhook_UnconfiguredRepo(t *testing.T) {
 		}
 	}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
@@ -911,7 +911,7 @@ func TestHandleWebhook_MultiRepo_MatchesSecondRepo(t *testing.T) {
 		}
 	}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-GitHub-Event", "push")
 	req.Header.Set("X-Hub-Signature-256", computeSignature(body, secret))
@@ -936,4 +936,200 @@ func makeEvent(fullName, cloneURL, sshURL, ref string) GitHubPushEvent {
 	e.Repository.CloneURL = cloneURL
 	e.Repository.SSHURL = sshURL
 	return e
+}
+
+// TestHandleRoot verifies the root path returns HTML for the Web UI placeholder.
+func TestHandleRoot(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+		checkBody      bool
+		bodyContains   string
+	}{
+		{
+			name:           "GET / returns 200 with HTML",
+			method:         http.MethodGet,
+			path:           "/",
+			expectedStatus: http.StatusOK,
+			checkBody:      true,
+			bodyContains:   "quadsyncd Web UI",
+		},
+		{
+			name:           "HEAD / returns 200",
+			method:         http.MethodHead,
+			path:           "/",
+			expectedStatus: http.StatusOK,
+			checkBody:      false,
+		},
+		{
+			name:           "POST / returns 405",
+			method:         http.MethodPost,
+			path:           "/",
+			expectedStatus: http.StatusMethodNotAllowed,
+			checkBody:      false,
+		},
+		{
+			name:           "unknown path returns 404",
+			method:         http.MethodGet,
+			path:           "/unknown",
+			expectedStatus: http.StatusNotFound,
+			checkBody:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			server.handleRoot(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+
+			if tt.checkBody {
+				if !bytes.Contains(rec.Body.Bytes(), []byte(tt.bodyContains)) {
+					t.Errorf("expected body to contain %q, got: %s", tt.bodyContains, rec.Body.String())
+				}
+				contentType := rec.Header().Get("Content-Type")
+				if !bytes.Contains([]byte(contentType), []byte("text/html")) {
+					t.Errorf("expected Content-Type to contain text/html, got: %s", contentType)
+				}
+			}
+		})
+	}
+}
+
+// TestHandleAssets verifies the /assets/* path returns 404 for now.
+func TestHandleAssets(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+	}{
+		{
+			name:           "GET /assets/app.js returns 404",
+			method:         http.MethodGet,
+			path:           "/assets/app.js",
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "HEAD /assets/style.css returns 404",
+			method:         http.MethodHead,
+			path:           "/assets/style.css",
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "POST /assets/app.js returns 405",
+			method:         http.MethodPost,
+			path:           "/assets/app.js",
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			server.handleAssets(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+		})
+	}
+}
+
+// TestHandleAPI verifies the /api/* path returns 501 Not Implemented.
+func TestHandleAPI(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		expectedStatus int
+		checkBody      bool
+	}{
+		{
+			name:           "GET /api/status returns 501",
+			method:         http.MethodGet,
+			path:           "/api/status",
+			expectedStatus: http.StatusNotImplemented,
+			checkBody:      true,
+		},
+		{
+			name:           "POST /api/sync returns 501",
+			method:         http.MethodPost,
+			path:           "/api/sync",
+			expectedStatus: http.StatusNotImplemented,
+			checkBody:      true,
+		},
+		{
+			name:           "GET /api/repos returns 501",
+			method:         http.MethodGet,
+			path:           "/api/repos",
+			expectedStatus: http.StatusNotImplemented,
+			checkBody:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
+
+			server.handleAPI(rec, req)
+
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
+			}
+
+			if tt.checkBody {
+				if !bytes.Contains(rec.Body.Bytes(), []byte("not implemented")) {
+					t.Errorf("expected body to mention 'not implemented', got: %s", rec.Body.String())
+				}
+				contentType := rec.Header().Get("Content-Type")
+				if contentType != "application/json" {
+					t.Errorf("expected Content-Type application/json, got: %s", contentType)
+				}
+			}
+		})
+	}
 }
