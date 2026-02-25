@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -442,12 +444,618 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAPI handles JSON API requests.
-// Currently returns HTTP 501 Not Implemented for all endpoints.
+// handleAPI routes JSON API requests to specific handlers.
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+
+	// Route to specific API handlers
+	if path == "/api/overview" {
+		s.handleOverview(w, r)
+		return
+	}
+	if path == "/api/runs" {
+		s.handleRuns(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/api/runs/") && strings.HasSuffix(path, "/logs") {
+		s.handleRunLogs(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/api/runs/") && strings.HasSuffix(path, "/plan") {
+		s.handleRunPlan(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/api/runs/") {
+		s.handleRunDetail(w, r)
+		return
+	}
+	if path == "/api/units" {
+		s.handleUnits(w, r)
+		return
+	}
+	if path == "/api/timer" {
+		s.handleTimer(w, r)
+		return
+	}
+
+	// Unknown API endpoint
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusNotImplemented)
 	_, _ = fmt.Fprintf(w, `{"error":"API endpoint not implemented"}`+"\n")
+}
+
+// handleOverview returns an overview of repositories and last run status.
+// GET /api/overview
+func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get repositories from config
+	repos := s.cfg.EffectiveRepositories()
+	type repoInfo struct {
+		URL       string  `json:"url"`
+		Ref       string  `json:"ref,omitempty"`
+		SHA       string  `json:"sha,omitempty"`
+		Freshness *string `json:"freshness,omitempty"`
+	}
+
+	repoInfos := make([]repoInfo, 0, len(repos))
+	for _, repo := range repos {
+		info := repoInfo{
+			URL: repo.URL,
+			Ref: repo.Ref,
+		}
+		repoInfos = append(repoInfos, info)
+	}
+
+	// Get last run to populate SHA and freshness
+	runs, err := s.store.List(ctx)
+	var lastRunID string
+	var lastRunStatus string
+
+	if err == nil && len(runs) > 0 {
+		lastRun := runs[0] // Already sorted newest first
+		lastRunID = lastRun.ID
+		lastRunStatus = string(lastRun.Status)
+
+		// Populate SHA from last run's revisions
+		for i := range repoInfos {
+			if sha, ok := lastRun.Revisions[repoInfos[i].URL]; ok {
+				repoInfos[i].SHA = sha
+
+				// Calculate freshness (best-effort)
+				if lastRun.EndedAt != nil {
+					age := time.Since(*lastRun.EndedAt)
+					freshness := formatFreshness(age)
+					repoInfos[i].Freshness = &freshness
+				}
+			}
+		}
+	}
+
+	response := map[string]interface{}{
+		"repositories": repoInfos,
+	}
+	if lastRunID != "" {
+		response["last_run_id"] = lastRunID
+		response["last_run_status"] = lastRunStatus
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// formatFreshness returns a human-readable freshness string.
+func formatFreshness(age time.Duration) string {
+	if age < time.Minute {
+		return "just now"
+	}
+	if age < time.Hour {
+		mins := int(age.Minutes())
+		if mins == 1 {
+			return "1 minute ago"
+		}
+		return fmt.Sprintf("%d minutes ago", mins)
+	}
+	if age < 24*time.Hour {
+		hours := int(age.Hours())
+		if hours == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hours)
+	}
+	days := int(age.Hours() / 24)
+	if days == 1 {
+		return "1 day ago"
+	}
+	return fmt.Sprintf("%d days ago", days)
+}
+
+// handleRuns returns a paginated list of runs.
+// GET /api/runs?limit=N&cursor=CURSOR
+func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse query parameters
+	query := r.URL.Query()
+	limit := 50 // default
+	if limitStr := query.Get("limit"); limitStr != "" {
+		if parsedLimit, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && parsedLimit == 1 {
+			if limit <= 0 || limit > 100 {
+				limit = 50
+			}
+		}
+	}
+
+	cursor := query.Get("cursor")
+
+	// Get all runs
+	runs, err := s.store.List(ctx)
+	if err != nil {
+		s.logger.Error("failed to list runs", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to list runs"})
+		return
+	}
+
+	// Apply cursor filtering (cursor is the run ID to start after)
+	startIdx := 0
+	if cursor != "" {
+		for i, run := range runs {
+			if run.ID == cursor {
+				startIdx = i + 1
+				break
+			}
+		}
+	}
+
+	// Apply pagination
+	endIdx := startIdx + limit
+	if endIdx > len(runs) {
+		endIdx = len(runs)
+	}
+
+	pageRuns := runs[startIdx:endIdx]
+
+	// Build response with summary items
+	items := make([]map[string]interface{}, len(pageRuns))
+	for i, run := range pageRuns {
+		item := map[string]interface{}{
+			"id":         run.ID,
+			"kind":       run.Kind,
+			"trigger":    run.Trigger,
+			"status":     run.Status,
+			"started_at": run.StartedAt.Format(time.RFC3339Nano),
+			"dry_run":    run.DryRun,
+		}
+		if run.EndedAt != nil {
+			item["ended_at"] = run.EndedAt.Format(time.RFC3339Nano)
+		}
+		if run.Error != "" {
+			item["error"] = run.Error
+		}
+		items[i] = item
+	}
+
+	response := map[string]interface{}{
+		"items": items,
+	}
+
+	// Add next_cursor if there are more results
+	if endIdx < len(runs) {
+		response["next_cursor"] = runs[endIdx-1].ID
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// handleRunDetail returns full metadata for a specific run.
+// GET /api/runs/{id}
+func (s *Server) handleRunDetail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// Extract run ID from path: /api/runs/{id}
+	path := r.URL.Path
+	id := strings.TrimPrefix(path, "/api/runs/")
+	if id == "" || id == path {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Missing run ID"})
+		return
+	}
+
+	ctx := r.Context()
+	meta, err := s.store.Get(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to get run", "id", id, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Run not found"})
+		return
+	}
+
+	// Return the full meta.json
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(meta)
+}
+
+// handleRunLogs returns paginated and filtered logs for a specific run.
+// GET /api/runs/{id}/logs?level=&component=&q=&since=&limit=&cursor=
+func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// Extract run ID from path: /api/runs/{id}/logs
+	path := r.URL.Path
+	path = strings.TrimPrefix(path, "/api/runs/")
+	path = strings.TrimSuffix(path, "/logs")
+	id := path
+	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Missing run ID"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Check if run exists first
+	if _, err := s.store.Get(ctx, id); err != nil {
+		s.logger.Warn("failed to get run for logs", "id", id, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Run not found"})
+		return
+	}
+
+	// Parse query parameters
+	query := r.URL.Query()
+	levelFilter := query.Get("level")
+	componentFilter := query.Get("component")
+	searchQuery := query.Get("q")
+	sinceStr := query.Get("since")
+	cursorStr := query.Get("cursor")
+
+	limit := 100 // default
+	if limitStr := query.Get("limit"); limitStr != "" {
+		if parsedLimit, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && parsedLimit == 1 {
+			if limit <= 0 || limit > 1000 {
+				limit = 100
+			}
+		}
+	}
+
+	// Parse since timestamp if provided
+	var sinceTime time.Time
+	if sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339Nano, sinceStr); err == nil {
+			sinceTime = t
+		} else if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			sinceTime = t
+		}
+	}
+
+	// Parse cursor (line offset)
+	cursorOffset := 0
+	if cursorStr != "" {
+		_, _ = fmt.Sscanf(cursorStr, "%d", &cursorOffset)
+	}
+
+	// Read logs
+	logs, err := s.store.ReadLog(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to read logs", "id", id, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Logs not found"})
+		return
+	}
+
+	// Filter logs
+	var filtered []map[string]interface{}
+	for _, record := range logs {
+		// Level filter
+		if levelFilter != "" {
+			if level, ok := record["level"].(string); ok {
+				if !strings.EqualFold(level, levelFilter) {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		// Component filter (check if component field contains the filter string)
+		if componentFilter != "" {
+			if component, ok := record["component"].(string); ok {
+				if !strings.Contains(strings.ToLower(component), strings.ToLower(componentFilter)) {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		// Search query (search in msg field)
+		if searchQuery != "" {
+			if msg, ok := record["msg"].(string); ok {
+				if !strings.Contains(strings.ToLower(msg), strings.ToLower(searchQuery)) {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+
+		// Since filter (check time field)
+		if !sinceTime.IsZero() {
+			if timeStr, ok := record["time"].(string); ok {
+				if t, err := time.Parse(time.RFC3339Nano, timeStr); err == nil {
+					if t.Before(sinceTime) {
+						continue
+					}
+				} else if t, err := time.Parse(time.RFC3339, timeStr); err == nil {
+					if t.Before(sinceTime) {
+						continue
+					}
+				}
+			}
+		}
+
+		filtered = append(filtered, record)
+	}
+
+	// Apply pagination with cursor offset
+	startIdx := cursorOffset
+	if startIdx > len(filtered) {
+		startIdx = len(filtered)
+	}
+
+	endIdx := startIdx + limit
+	if endIdx > len(filtered) {
+		endIdx = len(filtered)
+	}
+
+	pageRecords := filtered[startIdx:endIdx]
+
+	response := map[string]interface{}{
+		"items": pageRecords,
+	}
+
+	// Add next_cursor if there are more results
+	if endIdx < len(filtered) {
+		response["next_cursor"] = fmt.Sprintf("%d", endIdx)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+// handleRunPlan returns the plan.json for a specific run.
+// GET /api/runs/{id}/plan
+func (s *Server) handleRunPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// Extract run ID from path: /api/runs/{id}/plan
+	path := r.URL.Path
+	path = strings.TrimPrefix(path, "/api/runs/")
+	path = strings.TrimSuffix(path, "/plan")
+	id := path
+	if id == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Missing run ID"})
+		return
+	}
+
+	ctx := r.Context()
+	plan, err := s.store.ReadPlan(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to read plan", "id", id, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Plan not found"})
+		return
+	}
+
+	// Return the plan.json
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(plan)
+}
+
+// handleUnits returns a list of managed systemd units.
+// GET /api/units
+func (s *Server) handleUnits(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get the last successful run to determine managed units
+	runs, err := s.store.List(ctx)
+	if err != nil || len(runs) == 0 {
+		// No runs yet, return empty list
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"units": []interface{}{}})
+		return
+	}
+
+	// Find the most recent successful sync run
+	var lastSuccessfulRun *runstore.RunMeta
+	for i := range runs {
+		if runs[i].Kind == runstore.RunKindSync && runs[i].Status == runstore.RunStatusSuccess {
+			lastSuccessfulRun = &runs[i]
+			break
+		}
+	}
+
+	if lastSuccessfulRun == nil {
+		// No successful sync yet
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"units": []interface{}{}})
+		return
+	}
+
+	// Read state file to get managed files
+	stateFile := filepath.Join(s.cfg.Paths.StateDir, "state.json")
+	stateData, err := os.ReadFile(stateFile)
+	if err != nil {
+		s.logger.Warn("failed to read state file", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"units": []interface{}{}})
+		return
+	}
+
+	var state struct {
+		ManagedFiles []struct {
+			Path       string `json:"path"`
+			Unit       string `json:"unit"`
+			SourceRepo string `json:"source_repo"`
+			SourceRef  string `json:"source_ref"`
+			SourceSHA  string `json:"source_sha"`
+		} `json:"managed_files"`
+	}
+
+	if err := json.Unmarshal(stateData, &state); err != nil {
+		s.logger.Warn("failed to parse state file", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"units": []interface{}{}})
+		return
+	}
+
+	// Build unit list
+	units := make([]map[string]interface{}, 0, len(state.ManagedFiles))
+	for _, file := range state.ManagedFiles {
+		unit := map[string]interface{}{
+			"name":        file.Unit,
+			"path":        file.Path,
+			"source_repo": file.SourceRepo,
+			"source_ref":  file.SourceRef,
+			"source_sha":  file.SourceSHA,
+		}
+		units = append(units, unit)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"units": units})
+}
+
+// handleTimer returns timer status information.
+// GET /api/timer
+func (s *Server) handleTimer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// Try to get timer status via systemctl
+	// This is best-effort - if systemctl is not available or timer is not installed,
+	// we return minimal information
+	response := map[string]interface{}{
+		"available": false,
+	}
+
+	ctx := r.Context()
+	timerUnit := "quadsyncd-sync.timer"
+
+	// Check if systemd is available
+	available, err := s.systemd.IsAvailable(ctx)
+	if err != nil || !available {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Try to get timer status using systemctl show
+	cmd := exec.CommandContext(ctx, "systemctl", "--user", "show", timerUnit, "--property=ActiveState,SubState,UnitFileState,NextElapseUSecRealtime")
+	output, err := cmd.Output()
+	if err != nil {
+		// Timer not installed or not available
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Parse output
+	lines := strings.Split(string(output), "\n")
+	properties := make(map[string]string)
+	for _, line := range lines {
+		if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
+			properties[parts[0]] = parts[1]
+		}
+	}
+
+	response["available"] = true
+	response["unit"] = timerUnit
+	if state, ok := properties["ActiveState"]; ok {
+		response["active_state"] = state
+	}
+	if substate, ok := properties["SubState"]; ok {
+		response["sub_state"] = substate
+	}
+	if fileState, ok := properties["UnitFileState"]; ok {
+		response["unit_file_state"] = fileState
+	}
+
+	// Parse next elapse time (microseconds since epoch)
+	if nextStr, ok := properties["NextElapseUSecRealtime"]; ok && nextStr != "0" && nextStr != "" {
+		var usecVal int64
+		if _, err := fmt.Sscanf(nextStr, "%d", &usecVal); err == nil {
+			nextTime := time.Unix(0, usecVal*1000)
+			response["next_run"] = nextTime.Format(time.RFC3339Nano)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // verifySignature verifies the GitHub webhook signature
