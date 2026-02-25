@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
@@ -1135,4 +1136,82 @@ func TestHandleAPI(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlePlan(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Create test directories
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	t.Run("POST /api/plan creates plan run", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		server.handlePlan(w, req)
+
+		// Should return 200 or 500 depending on sync success
+		// (in tests it will likely fail due to missing repo, but that's ok)
+		if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 200 or 500, got %d", w.Code)
+		}
+
+		// Response should be JSON with run_id
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if runID, ok := resp["run_id"].(string); !ok || runID == "" {
+			t.Errorf("expected run_id in response, got %v", resp)
+		}
+
+		// Verify run record was created
+		store := runstore.NewStore(cfg.Paths.StateDir, logger)
+		runs, err := store.List(context.Background())
+		if err != nil {
+			t.Fatalf("failed to list runs: %v", err)
+		}
+
+		if len(runs) == 0 {
+			t.Fatal("expected at least one run record")
+		}
+
+		// Check that the latest run is a plan
+		latestRun := runs[0]
+		if latestRun.Kind != runstore.RunKindPlan {
+			t.Errorf("expected run kind 'plan', got %s", latestRun.Kind)
+		}
+		if latestRun.Trigger != runstore.TriggerUI {
+			t.Errorf("expected trigger 'ui', got %s", latestRun.Trigger)
+		}
+		if !latestRun.DryRun {
+			t.Error("expected dry_run to be true for plan")
+		}
+	})
+
+	t.Run("GET /api/plan returns 405", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		server.handlePlan(w, req)
+
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected status 405, got %d", w.Code)
+		}
+	})
 }

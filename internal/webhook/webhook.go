@@ -110,6 +110,7 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 	mux.HandleFunc("/webhook", s.handleWebhook)
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("/assets/", s.handleAssets)
+	mux.HandleFunc("/api/plan", s.handlePlan)
 	mux.HandleFunc("/api/", s.handleAPI)
 
 	server := &http.Server{
@@ -262,6 +263,121 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 
 	// Placeholder: return 404 for all assets until Web UI is implemented
 	http.NotFound(w, r)
+}
+
+// handlePlan handles UI-triggered plan execution (dry-run sync).
+// POST /api/plan triggers a plan operation that creates a run record with plan.json.
+func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Create initial run metadata for plan
+	meta := &runstore.RunMeta{
+		Kind:      runstore.RunKindPlan,
+		Trigger:   runstore.TriggerUI,
+		StartedAt: time.Now().UTC(),
+		Status:    runstore.RunStatusRunning,
+		DryRun:    true,
+		Revisions: make(map[string]string),
+		Conflicts: []runstore.ConflictSummary{},
+	}
+
+	if err := s.store.Create(ctx, meta); err != nil {
+		s.logger.Error("failed to create plan run record", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":"Failed to create plan record"}`, http.StatusInternalServerError)
+		return
+	}
+
+	s.logger.Info("created plan run record", "run_id", meta.ID)
+
+	// Create a tee logger that writes to both console and runstore
+	var ndjsonLevel slog.Level = slog.LevelInfo
+	if leveler, ok := s.logger.Handler().(interface{ Level() slog.Level }); ok {
+		ndjsonLevel = leveler.Level()
+	}
+
+	ndjsonHandler := logging.NewNDJSONHandler(func(line []byte) error {
+		return s.store.AppendLog(ctx, meta.ID, line)
+	}, &logging.NDJSONHandlerOptions{
+		Level: ndjsonLevel,
+	})
+
+	teeHandler := logging.NewTeeHandler(s.logger.Handler(), ndjsonHandler)
+	logger := slog.New(teeHandler)
+
+	// Run sync in dry-run mode (plan)
+	logger.Info("performing plan operation")
+	engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, true)
+	result, planErr := engine.Run(ctx)
+
+	// Finalize run metadata
+	endedAt := time.Now().UTC()
+	meta.EndedAt = &endedAt
+
+	if planErr != nil {
+		meta.Status = runstore.RunStatusError
+		meta.Error = planErr.Error()
+		logger.Error("plan failed", "error", planErr)
+	} else {
+		meta.Status = runstore.RunStatusSuccess
+		logger.Info("plan completed successfully")
+	}
+
+	// Populate revisions and conflicts from result
+	if result != nil {
+		meta.Revisions = result.Revisions
+		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
+		for i, c := range result.Conflicts {
+			losers := make([]runstore.EffectiveItemSummary, len(c.Losers))
+			for j, l := range c.Losers {
+				losers[j] = runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: l.Repo,
+					SourceRef:  l.Ref,
+					SourceSHA:  l.SHA,
+				}
+			}
+			meta.Conflicts[i] = runstore.ConflictSummary{
+				MergeKey: c.MergeKey,
+				Winner: runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: c.WinnerRepo,
+					SourceRef:  c.WinnerRef,
+					SourceSHA:  c.WinnerSHA,
+				},
+				Losers: losers,
+			}
+		}
+	}
+
+	// Update run metadata with final state
+	if err := s.store.Update(ctx, meta); err != nil {
+		logger.Error("failed to update plan run record", "error", err)
+	}
+
+	// Return plan run ID in response
+	w.Header().Set("Content-Type", "application/json")
+	if planErr != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		resp := map[string]interface{}{
+			"error":  planErr.Error(),
+			"run_id": meta.ID,
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	} else {
+		w.WriteHeader(http.StatusOK)
+		resp := map[string]interface{}{
+			"run_id": meta.ID,
+			"status": "success",
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}
 }
 
 // handleAPI handles JSON API requests.
