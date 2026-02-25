@@ -153,8 +153,8 @@ sync:
 		t.Fatalf("failed to append log: %v", err)
 	}
 
-	// Read logs back
-	logs, err := store.ReadLog(ctx, meta.ID)
+	// Read logs back (offset=0, limit=0 reads all)
+	logs, err := store.ReadLog(ctx, meta.ID, 0, 0)
 	if err != nil {
 		t.Fatalf("failed to read logs: %v", err)
 	}

@@ -784,8 +784,13 @@ func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request) {
 		cursorOffset = offset
 	}
 
-	// Read logs
-	logs, err := s.store.ReadLog(ctx, id)
+	// Read logs with pagination (apply offset and limit at the file-read level)
+	// Note: We read limit*2 to account for potential filtering, but this is still bounded
+	readLimit := limit * 2
+	if readLimit > 10000 {
+		readLimit = 10000
+	}
+	logs, err := s.store.ReadLog(ctx, id, cursorOffset, readLimit)
 	if err != nil {
 		s.logger.Warn("failed to read logs", "id", id, "error", err)
 		w.Header().Set("Content-Type", "application/json")

@@ -247,8 +247,8 @@ func TestStore_AppendLogAndReadLog(t *testing.T) {
 		}
 	}
 
-	// Read logs back
-	retrieved, err := store.ReadLog(ctx, meta.ID)
+	// Read logs back (offset=0, limit=0 means read all up to max)
+	retrieved, err := store.ReadLog(ctx, meta.ID, 0, 0)
 	if err != nil {
 		t.Fatalf("ReadLog: %v", err)
 	}
@@ -282,8 +282,8 @@ func TestStore_ReadLog_MissingFile(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Read logs without appending anything
-	logs, err := store.ReadLog(ctx, meta.ID)
+	// Read logs without appending anything (offset=0, limit=0 reads all)
+	logs, err := store.ReadLog(ctx, meta.ID, 0, 0)
 	if err != nil {
 		t.Fatalf("ReadLog: %v", err)
 	}

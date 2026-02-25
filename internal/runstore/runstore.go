@@ -320,9 +320,10 @@ func (s *Store) AppendLog(ctx context.Context, id string, line []byte) (err erro
 	return nil
 }
 
-// ReadLog reads all log records from log.ndjson.
-// Returns an empty slice if the log file doesn't exist.
-func (s *Store) ReadLog(ctx context.Context, id string) ([]map[string]interface{}, error) {
+// ReadLog reads NDJSON log records from log.ndjson with pagination support.
+// offset: number of records to skip from the beginning (0-indexed)
+// limit: maximum number of records to return (0 means no limit, but capped at 10000)
+func (s *Store) ReadLog(ctx context.Context, id string, offset, limit int) ([]map[string]interface{}, error) {
 	runDir, err := s.safeRunDir(id)
 	if err != nil {
 		return nil, err
@@ -343,8 +344,15 @@ func (s *Store) ReadLog(ctx context.Context, id string) ([]map[string]interface{
 		}
 	}()
 
+	// Safety cap: never return more than 10000 records to prevent unbounded memory usage
+	const maxRecords = 10000
+	if limit <= 0 || limit > maxRecords {
+		limit = maxRecords
+	}
+
 	var records []map[string]interface{}
 	scanner := bufio.NewScanner(f)
+	lineNum := 0
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -352,12 +360,25 @@ func (s *Store) ReadLog(ctx context.Context, id string) ([]map[string]interface{
 			continue
 		}
 
+		// Skip records before offset
+		if lineNum < offset {
+			lineNum++
+			continue
+		}
+
+		// Stop if we've collected enough records
+		if len(records) >= limit {
+			break
+		}
+
 		var record map[string]interface{}
 		if err := json.Unmarshal(line, &record); err != nil {
-			s.logger.Warn("failed to parse log line (skipping)", "id", id, "error", err)
+			s.logger.Warn("failed to parse log line (skipping)", "id", id, "error", err, "line", lineNum)
+			lineNum++
 			continue
 		}
 		records = append(records, record)
+		lineNum++
 	}
 
 	if err := scanner.Err(); err != nil {
