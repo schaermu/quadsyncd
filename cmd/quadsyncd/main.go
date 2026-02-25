@@ -8,10 +8,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/schaermu/quadsyncd/internal/activation"
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
+	"github.com/schaermu/quadsyncd/internal/logging"
+	"github.com/schaermu/quadsyncd/internal/runstore"
 	"github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
 	"github.com/schaermu/quadsyncd/internal/webhook"
@@ -98,14 +101,67 @@ func runSync(cmd *cobra.Command, args []string) error {
 	ctx, cancel := setupSignalHandler()
 	defer cancel()
 
-	// Setup logger
-	logger := setupLogger()
+	// Setup console logger
+	consoleLogger := setupLogger()
 
 	// Load configuration
-	cfg, err := loadConfig(logger)
+	cfg, err := loadConfig(consoleLogger)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	// Initialize runstore
+	store := runstore.NewStore(cfg.Paths.StateDir, consoleLogger)
+
+	// Determine trigger source (default to CLI; timer should be detected via env)
+	trigger := runstore.TriggerCLI
+	if os.Getenv("INVOCATION_ID") != "" {
+		// Running under systemd (timer or service)
+		trigger = runstore.TriggerTimer
+	}
+
+	// Create initial run metadata
+	meta := &runstore.RunMeta{
+		Kind:      runstore.RunKindSync,
+		Trigger:   trigger,
+		StartedAt: time.Now().UTC(),
+		Status:    runstore.RunStatusRunning,
+		DryRun:    dryRun,
+		Revisions: make(map[string]string),
+		Conflicts: []runstore.ConflictSummary{},
+	}
+
+	if err := store.Create(ctx, meta); err != nil {
+		consoleLogger.Error("failed to create run record", "error", err)
+		return fmt.Errorf("failed to create run record: %w", err)
+	}
+
+	consoleLogger.Info("created run record", "run_id", meta.ID)
+
+	// Parse log level for ndjson handler
+	var ndjsonLevel slog.Level
+	switch logLevel {
+	case "debug":
+		ndjsonLevel = slog.LevelDebug
+	case "info":
+		ndjsonLevel = slog.LevelInfo
+	case "warn":
+		ndjsonLevel = slog.LevelWarn
+	case "error":
+		ndjsonLevel = slog.LevelError
+	default:
+		ndjsonLevel = slog.LevelInfo
+	}
+
+	// Create a tee logger that writes to both console and runstore
+	ndjsonHandler := logging.NewNDJSONHandler(func(line []byte) error {
+		return store.AppendLog(ctx, meta.ID, line)
+	}, &logging.NDJSONHandlerOptions{
+		Level: ndjsonLevel,
+	})
+
+	teeHandler := logging.NewTeeHandler(consoleLogger.Handler(), ndjsonHandler)
+	logger := slog.New(teeHandler)
 
 	// Create dependencies
 	factory := func(auth config.AuthConfig) git.Client {
@@ -113,17 +169,59 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 	systemdClient := systemduser.NewClient()
 
-	// Create sync engine
+	// Create sync engine with tee logger
 	engine := sync.NewEngineWithFactory(cfg, factory, systemdClient, logger, dryRun)
 
 	// Run sync
 	logger.Info("starting sync operation")
-	if err := engine.Run(ctx); err != nil {
-		logger.Error("sync failed", "error", err)
-		return err
+	result, syncErr := engine.Run(ctx)
+
+	// Finalize run metadata
+	endedAt := time.Now().UTC()
+	meta.EndedAt = &endedAt
+
+	if syncErr != nil {
+		meta.Status = runstore.RunStatusError
+		meta.Error = syncErr.Error()
+		logger.Error("sync failed", "error", syncErr)
+	} else {
+		meta.Status = runstore.RunStatusSuccess
+		logger.Info("sync completed successfully")
 	}
 
-	return nil
+	// Populate revisions and conflicts from result
+	if result != nil {
+		meta.Revisions = result.Revisions
+		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
+		for i, c := range result.Conflicts {
+			losers := make([]runstore.EffectiveItemSummary, len(c.Losers))
+			for j, l := range c.Losers {
+				losers[j] = runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: l.Repo,
+					SourceRef:  l.Ref,
+					SourceSHA:  l.SHA,
+				}
+			}
+			meta.Conflicts[i] = runstore.ConflictSummary{
+				MergeKey: c.MergeKey,
+				Winner: runstore.EffectiveItemSummary{
+					MergeKey:   c.MergeKey,
+					SourceRepo: c.WinnerRepo,
+					SourceRef:  c.WinnerRef,
+					SourceSHA:  c.WinnerSHA,
+				},
+				Losers: losers,
+			}
+		}
+	}
+
+	// Update run metadata with final state
+	if err := store.Update(ctx, meta); err != nil {
+		logger.Error("failed to update run record", "error", err)
+	}
+
+	return syncErr
 }
 
 func runServe(cmd *cobra.Command, args []string) error {

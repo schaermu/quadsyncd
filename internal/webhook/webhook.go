@@ -393,7 +393,8 @@ func (s *Server) performSync(ctx context.Context) {
 		s.logger.Info("performing sync operation")
 
 		engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, s.logger, false)
-		if err := engine.Run(runCtx); err != nil {
+		_, err := engine.Run(runCtx)
+		if err != nil {
 			s.logger.Error("sync failed", "error", err)
 		} else {
 			s.logger.Info("sync completed successfully")

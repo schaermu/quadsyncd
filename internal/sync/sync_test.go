@@ -651,7 +651,7 @@ func TestRun_DryRun(t *testing.T) {
 
 	engine := NewEngine(cfg, gitMock, sd, testLogger(), true)
 
-	if err := engine.Run(context.Background()); err != nil {
+	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run dry-run: %v", err)
 	}
 
@@ -692,7 +692,7 @@ func TestRun_FullSync(t *testing.T) {
 
 	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
 
-	if err := engine.Run(context.Background()); err != nil {
+	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run full sync: %v", err)
 	}
 
@@ -730,7 +730,7 @@ func TestRun_GitError(t *testing.T) {
 	}
 
 	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error from git failure")
 	}
@@ -759,7 +759,7 @@ func TestRun_SystemdUnavailable(t *testing.T) {
 	}
 
 	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when systemd unavailable")
 	}
@@ -928,7 +928,7 @@ func TestRun_RecoversFromCorruptedState(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run should recover from corrupted state, got error: %v", err)
 	}
@@ -959,7 +959,7 @@ func TestRun_HandleRestartsError(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true, restartErr: fmt.Errorf("restart failed")}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err != nil {
 		t.Errorf("Run should not fail due to restart error, got: %v", err)
 	}
@@ -986,7 +986,7 @@ func TestRun_DaemonReloadError(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true, reloadErr: fmt.Errorf("daemon-reload failed")}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when DaemonReload fails, got nil")
 	}
@@ -1012,7 +1012,7 @@ func TestRun_BuildPlanError(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when buildPlan fails, got nil")
 	}
@@ -1046,7 +1046,7 @@ func TestRun_SaveStateError(t *testing.T) {
 	if err := os.MkdirAll(blocker, 0755); err != nil {
 		t.Fatal(err)
 	}
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when saveState fails, got nil")
 	}
@@ -1084,7 +1084,7 @@ func TestRun_ValidateQuadletsError(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true, validateErr: fmt.Errorf("invalid quadlet syntax")}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when ValidateQuadlets fails, got nil")
 	}
@@ -1126,7 +1126,7 @@ func TestRun_ValidateQuadletsCalled(t *testing.T) {
 	}
 	ms := &mockSystemd{available: true}
 	engine := NewEngine(cfg, mg, ms, testLogger(), false)
-	if err := engine.Run(context.Background()); err != nil {
+	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !ms.validateCalled {
@@ -1191,7 +1191,7 @@ func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
 	sd := &mockSystemd{available: true}
 	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
 
-	if err := engine.Run(context.Background()); err != nil {
+	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run multi-repo: %v", err)
 	}
 
@@ -1257,7 +1257,7 @@ func TestRun_MultiRepo_ConflictPreferHighestPriority(t *testing.T) {
 	sd := &mockSystemd{available: true}
 	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
 
-	if err := engine.Run(context.Background()); err != nil {
+	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run multi-repo conflict: %v", err)
 	}
 
@@ -1307,7 +1307,7 @@ func TestRun_MultiRepo_ConflictFail(t *testing.T) {
 	sd := &mockSystemd{available: true}
 	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
 
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected conflict error in fail mode, got nil")
 	}
@@ -1347,7 +1347,7 @@ func TestRun_MultiRepo_FailFast_OneRepoErrors(t *testing.T) {
 	sd := &mockSystemd{available: true}
 	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
 
-	err := engine.Run(context.Background())
+	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when one repo fails, got nil")
 	}

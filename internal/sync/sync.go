@@ -24,6 +24,28 @@ import (
 // Used to produce per-repo clients when auth overrides are configured.
 type GitClientFactory func(auth config.AuthConfig) git.Client
 
+// Result contains the outcome of a sync operation.
+type Result struct {
+	Revisions map[string]string // repo_url -> commit_sha
+	Conflicts []Conflict        // same-path conflicts encountered
+}
+
+// Conflict captures a same-path conflict resolved during merge.
+type Conflict struct {
+	MergeKey   string
+	WinnerRepo string
+	WinnerRef  string
+	WinnerSHA  string
+	Losers     []ConflictLoser
+}
+
+// ConflictLoser describes a repository that lost a conflict.
+type ConflictLoser struct {
+	Repo string
+	Ref  string
+	SHA  string
+}
+
 // Engine orchestrates the sync process
 type Engine struct {
 	cfg        *config.Config
@@ -57,8 +79,8 @@ func NewEngineWithFactory(cfg *config.Config, factory GitClientFactory, systemd 
 	}
 }
 
-// Run executes the complete sync process
-func (e *Engine) Run(ctx context.Context) error {
+// Run executes the complete sync process and returns structured results.
+func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	repos := e.cfg.EffectiveRepositories()
 
 	e.logger.Info("starting sync",
@@ -67,13 +89,13 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Ensure state directory exists
 	if err := os.MkdirAll(e.cfg.Paths.StateDir, 0755); err != nil {
-		return fmt.Errorf("failed to create state directory: %w", err)
+		return nil, fmt.Errorf("failed to create state directory: %w", err)
 	}
 
 	// Load all repo states (fail-fast: if any repo fails, nothing is applied)
 	repoStates, err := e.loadAllRepoStates(ctx, repos)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, rs := range repoStates {
@@ -91,7 +113,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	mergeResult, err := multirepo.Merge(repoStates, conflictMode)
 	if err != nil {
-		return fmt.Errorf("failed to merge repository states: %w", err)
+		return nil, fmt.Errorf("failed to merge repository states: %w", err)
 	}
 
 	// Warn on same-path conflicts in prefer mode
@@ -122,7 +144,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Build sync plan from effective items
 	plan, err := e.buildPlanFromEffective(prevState, mergeResult.Items)
 	if err != nil {
-		return fmt.Errorf("failed to build sync plan: %w", err)
+		return nil, fmt.Errorf("failed to build sync plan: %w", err)
 	}
 
 	e.logger.Info("sync plan",
@@ -130,39 +152,65 @@ func (e *Engine) Run(ctx context.Context) error {
 		"update", len(plan.Update),
 		"delete", len(plan.Delete))
 
+	// Build result with revisions and conflicts
+	result := &Result{
+		Revisions: make(map[string]string),
+		Conflicts: make([]Conflict, 0, len(mergeResult.Conflicts)),
+	}
+	for _, rs := range repoStates {
+		result.Revisions[rs.Spec.URL] = rs.Commit
+	}
+	for _, c := range mergeResult.Conflicts {
+		losers := make([]ConflictLoser, len(c.Losers))
+		for i, l := range c.Losers {
+			losers[i] = ConflictLoser{
+				Repo: l.SourceRepo,
+				Ref:  l.SourceRef,
+				SHA:  l.SourceSHA,
+			}
+		}
+		result.Conflicts = append(result.Conflicts, Conflict{
+			MergeKey:   c.MergeKey,
+			WinnerRepo: c.Winner.SourceRepo,
+			WinnerRef:  c.Winner.SourceRef,
+			WinnerSHA:  c.Winner.SourceSHA,
+			Losers:     losers,
+		})
+	}
+
 	if e.dryRun {
 		e.logPlanDetails(plan)
 		e.logger.Info("dry-run complete, no changes applied")
-		return nil
+		return result, nil
 	}
 
 	// Check systemd availability
 	available, err := e.systemd.IsAvailable(ctx)
 	if err != nil || !available {
-		return fmt.Errorf("systemd user session not available: %w", err)
+		return nil, fmt.Errorf("systemd user session not available: %w", err)
 	}
 
 	// Apply plan
 	if err := e.applyPlan(plan); err != nil {
-		return fmt.Errorf("failed to apply sync plan: %w", err)
+		return nil, fmt.Errorf("failed to apply sync plan: %w", err)
 	}
 
 	// Validate quadlet definitions
 	e.logger.Info("validating quadlet definitions", "quadlet_dir", e.cfg.Paths.QuadletDir)
 	if err := e.systemd.ValidateQuadlets(ctx, e.cfg.Paths.QuadletDir); err != nil {
-		return fmt.Errorf("failed to validate quadlet definitions: %w", err)
+		return nil, fmt.Errorf("failed to validate quadlet definitions: %w", err)
 	}
 
 	// Save new state
 	newState := e.buildStateFromEffective(prevState, plan, repoStates)
 	if err := e.saveState(newState); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+		return nil, fmt.Errorf("failed to save state: %w", err)
 	}
 
 	// Reload systemd
 	e.logger.Info("reloading systemd daemon")
 	if err := e.systemd.DaemonReload(ctx); err != nil {
-		return fmt.Errorf("failed to reload systemd: %w", err)
+		return nil, fmt.Errorf("failed to reload systemd: %w", err)
 	}
 
 	// Handle restarts based on policy
@@ -171,7 +219,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 
 	e.logger.Info("sync completed successfully")
-	return nil
+	return result, nil
 }
 
 // loadAllRepoStates loads all repositories fail-fast.
