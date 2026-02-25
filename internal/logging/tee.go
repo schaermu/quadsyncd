@@ -32,6 +32,9 @@ func (t *TeeHandler) Enabled(ctx context.Context, level slog.Level) bool {
 func (t *TeeHandler) Handle(ctx context.Context, r slog.Record) error {
 	var lastErr error
 	for _, h := range t.handlers {
+		if !h.Enabled(ctx, r.Level) {
+			continue
+		}
 		if err := h.Handle(ctx, r.Clone()); err != nil {
 			lastErr = err
 		}
