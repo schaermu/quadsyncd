@@ -6,24 +6,29 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
+	"github.com/schaermu/quadsyncd/internal/runstore"
 )
 
 // mockGitClient is a mock implementation of git.Client
 type mockGitClient struct {
 	checkoutCalled bool
 	shouldFail     bool
+	commit         string
+	repoSetup      func(destDir string)
 }
 
 func (m *mockGitClient) EnsureCheckout(ctx context.Context, url, ref, dest string) (string, error) {
@@ -31,7 +36,14 @@ func (m *mockGitClient) EnsureCheckout(ctx context.Context, url, ref, dest strin
 	if m.shouldFail {
 		return "", http.ErrServerClosed
 	}
-	return "abc123", nil
+	if m.repoSetup != nil {
+		m.repoSetup(dest)
+	}
+	commit := m.commit
+	if commit == "" {
+		commit = "abc123"
+	}
+	return commit, nil
 }
 
 // mockGitFactory returns a GitClientFactory that always returns the given mock.
@@ -121,11 +133,12 @@ func computeSignature(body []byte, secret string) string {
 func TestNewServer(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	store := runstore.NewStore(cfg.Paths.StateDir, logger)
 
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, store, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -144,10 +157,11 @@ func TestNewServer_MissingSecretFile(t *testing.T) {
 	cfg.Serve.GitHubWebhookSecretFile = "/nonexistent/secret"
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	store := runstore.NewStore(cfg.Paths.StateDir, logger)
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	_, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	_, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, store, logger)
 	if err == nil {
 		t.Fatal("expected error for missing secret file, got nil")
 	}
@@ -167,7 +181,7 @@ func TestStart_PerformsInitialSync(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -190,7 +204,7 @@ func TestVerifySignature(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -280,7 +294,7 @@ func TestIsEventTypeAllowed(t *testing.T) {
 			mockGit := &mockGitClient{}
 			mockSys := &mockSystemd{}
 
-			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -330,7 +344,7 @@ func TestIsRefAllowed(t *testing.T) {
 			mockGit := &mockGitClient{}
 			mockSys := &mockSystemd{}
 
-			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -358,7 +372,7 @@ func TestHandleWebhook_ValidRequest(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -394,7 +408,7 @@ func TestHandleWebhook_InvalidMethod(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -416,7 +430,7 @@ func TestHandleWebhook_InvalidContentType(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -439,7 +453,7 @@ func TestHandleWebhook_InvalidSignature(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -466,7 +480,7 @@ func TestHandleWebhook_DisallowedEventType(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -498,7 +512,7 @@ func TestHandleWebhook_DisallowedRef(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -582,7 +596,7 @@ func TestPerformSync_SingleFlight(t *testing.T) {
 	}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, func(_ config.AuthConfig) git.Client { return slowGit }, mockSys, logger)
+	server, err := NewServer(cfg, func(_ config.AuthConfig) git.Client { return slowGit }, mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -593,7 +607,7 @@ func TestPerformSync_SingleFlight(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		server.performSync(ctx)
+		server.performSync(ctx, runstore.TriggerWebhook)
 	}()
 
 	// Wait until the first sync has started (git checkout entered).
@@ -606,7 +620,7 @@ func TestPerformSync_SingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			server.performSync(ctx)
+			server.performSync(ctx, runstore.TriggerWebhook)
 		}()
 	}
 	wg.Wait()
@@ -666,7 +680,7 @@ func TestStartWithListener(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -817,7 +831,7 @@ func TestMatchesConfiguredRepo(t *testing.T) {
 			mockGit := &mockGitClient{}
 			mockSys := &mockSystemd{}
 
-			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+			server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -844,7 +858,7 @@ func TestHandleWebhook_UnconfiguredRepo(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -896,7 +910,7 @@ func TestHandleWebhook_MultiRepo_MatchesSecondRepo(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -946,7 +960,7 @@ func TestHandleRoot(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1022,7 +1036,7 @@ func TestHandleAssets(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1075,7 +1089,7 @@ func TestHandleAPI(t *testing.T) {
 	mockGit := &mockGitClient{}
 	mockSys := &mockSystemd{}
 
-	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, logger)
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1132,4 +1146,172 @@ func TestHandleAPI(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandlePlan(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Create test directories
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &mockGitClient{}
+	mockSys := &mockSystemd{}
+
+	server, err := NewServer(cfg, mockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+
+	t.Run("POST /api/plan creates plan run", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		server.handlePlan(w, req)
+
+		// Should return 200 or 500 depending on sync success
+		// (in tests it will likely fail due to missing repo, but that's ok)
+		if w.Code != http.StatusOK && w.Code != http.StatusInternalServerError {
+			t.Errorf("expected status 200 or 500, got %d", w.Code)
+		}
+
+		// Response should be JSON with run_id
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if runID, ok := resp["run_id"].(string); !ok || runID == "" {
+			t.Errorf("expected run_id in response, got %v", resp)
+		}
+
+		// Verify run record was created
+		store := runstore.NewStore(cfg.Paths.StateDir, logger)
+		runs, err := store.List(context.Background())
+		if err != nil {
+			t.Fatalf("failed to list runs: %v", err)
+		}
+
+		if len(runs) == 0 {
+			t.Fatal("expected at least one run record")
+		}
+
+		// Check that the latest run is a plan
+		latestRun := runs[0]
+		if latestRun.Kind != runstore.RunKindPlan {
+			t.Errorf("expected run kind 'plan', got %s", latestRun.Kind)
+		}
+		if latestRun.Trigger != runstore.TriggerUI {
+			t.Errorf("expected trigger 'ui', got %s", latestRun.Trigger)
+		}
+		if !latestRun.DryRun {
+			t.Error("expected dry_run to be true for plan")
+		}
+	})
+
+	t.Run("POST /api/plan successful dry-run with plan.json", func(t *testing.T) {
+		// Create a new server with a mock that sets up a quadlet repo
+		mockGitWithRepo := &mockGitClient{
+			commit: "test-commit-sha",
+			repoSetup: func(destDir string) {
+				// Create a minimal quadlet structure
+				quadletSubdir := filepath.Join(destDir, cfg.Repository.Subdir)
+				if err := os.MkdirAll(quadletSubdir, 0755); err != nil {
+					t.Fatalf("failed to create quadlet subdir: %v", err)
+				}
+				// Write a sample .container file
+				containerFile := filepath.Join(quadletSubdir, "test-app.container")
+				content := `[Container]
+Image=docker.io/library/nginx:latest
+PublishPort=8080:80
+
+[Service]
+Restart=always
+`
+				if err := os.WriteFile(containerFile, []byte(content), 0644); err != nil {
+					t.Fatalf("failed to write quadlet file: %v", err)
+				}
+			},
+		}
+
+		serverWithRepo, err := NewServer(cfg, mockGitFactory(mockGitWithRepo), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+		if err != nil {
+			t.Fatalf("NewServer() failed: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		serverWithRepo.handlePlan(w, req)
+
+		// Should return 200 on successful plan
+		if w.Code != http.StatusOK {
+			t.Errorf("expected status 200, got %d", w.Code)
+		}
+
+		// Response should be JSON with run_id and success status
+		var resp map[string]interface{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		runID, ok := resp["run_id"].(string)
+		if !ok || runID == "" {
+			t.Errorf("expected run_id in response, got %v", resp)
+		}
+
+		status, ok := resp["status"].(string)
+		if !ok || status != "success" {
+			t.Errorf("expected status 'success', got %v", resp)
+		}
+
+		// Verify plan.json was created and can be read
+		store := runstore.NewStore(cfg.Paths.StateDir, logger)
+		plan, err := store.ReadPlan(context.Background(), runID)
+		if err != nil {
+			t.Fatalf("failed to read plan.json: %v", err)
+		}
+
+		// Validate plan structure
+		if len(plan.Ops) == 0 {
+			t.Error("expected at least one operation in plan")
+		}
+
+		// Verify we have an 'add' operation for the test-app.container
+		foundAdd := false
+		for _, op := range plan.Ops {
+			if op.Op == "add" && strings.Contains(op.Path, "test-app.container") {
+				foundAdd = true
+				if op.SourceRepo != cfg.Repository.URL {
+					t.Errorf("expected source_repo %s, got %s", cfg.Repository.URL, op.SourceRepo)
+				}
+				if op.SourceRef != cfg.Repository.Ref {
+					t.Errorf("expected source_ref %s, got %s", cfg.Repository.Ref, op.SourceRef)
+				}
+				if op.SourceSHA != "test-commit-sha" {
+					t.Errorf("expected source_sha 'test-commit-sha', got %s", op.SourceSHA)
+				}
+			}
+		}
+
+		if !foundAdd {
+			t.Error("expected to find 'add' operation for test-app.container in plan")
+		}
+	})
+
+	t.Run("GET /api/plan returns 405", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/plan", nil)
+		w := httptest.NewRecorder()
+
+		server.handlePlan(w, req)
+
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected status 405, got %d", w.Code)
+		}
+	})
 }

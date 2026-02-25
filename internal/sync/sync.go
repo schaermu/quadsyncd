@@ -28,6 +28,7 @@ type GitClientFactory func(auth config.AuthConfig) git.Client
 type Result struct {
 	Revisions map[string]string // repo_url -> commit_sha
 	Conflicts []Conflict        // same-path conflicts encountered
+	Plan      *Plan             // computed plan (always populated, even in dry-run)
 }
 
 // Conflict captures a same-path conflict resolved during merge.
@@ -156,6 +157,7 @@ func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	result := &Result{
 		Revisions: make(map[string]string),
 		Conflicts: make([]Conflict, 0, len(mergeResult.Conflicts)),
+		Plan:      plan,
 	}
 	for _, rs := range repoStates {
 		result.Revisions[rs.Spec.URL] = rs.Commit
