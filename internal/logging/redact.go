@@ -49,9 +49,17 @@ func (h *RedactingHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 // WithAttrs returns a new RedactingHandler with the given attributes added to
-// the wrapped handler.
+// the wrapped handler. Attrs are redacted before being forwarded so that secrets
+// added via logger.With(...) do not bypass redaction.
 func (h *RedactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &RedactingHandler{inner: h.inner.WithAttrs(attrs), secrets: h.secrets}
+	if len(attrs) == 0 || len(h.secrets) == 0 {
+		return &RedactingHandler{inner: h.inner.WithAttrs(attrs), secrets: h.secrets}
+	}
+	redacted := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		redacted[i] = h.redactAttr(a)
+	}
+	return &RedactingHandler{inner: h.inner.WithAttrs(redacted), secrets: h.secrets}
 }
 
 // WithGroup returns a new RedactingHandler with the given group added to the

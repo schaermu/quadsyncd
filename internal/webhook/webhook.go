@@ -167,21 +167,25 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// On GET / ensure the CSRF cookie is present so the SPA can read it.
+		// On GET / ensure the CSRF cookie is present (or non-empty) so the SPA can read it.
 		if r.URL.Path == "/" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
-			if _, err := r.Cookie(csrfCookieName); err != nil {
+			existing, err := r.Cookie(csrfCookieName)
+			if err != nil || existing.Value == "" {
 				token, err := generateCSRFToken()
 				if err != nil {
 					http.Error(w, "Failed to generate CSRF token", http.StatusInternalServerError)
 					return
 				}
+				// Mark Secure only when the connection is HTTPS — either direct TLS
+				// or a trusted local reverse proxy that sets X-Forwarded-Proto=https.
+				secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 				http.SetCookie(w, &http.Cookie{
 					Name:     csrfCookieName,
 					Value:    token,
 					Path:     "/",
 					SameSite: http.SameSiteLaxMode,
 					HttpOnly: false, // must be readable by JavaScript
-					Secure:   true,  // safe for localhost and required when served via HTTPS proxy
+					Secure:   secure,
 				})
 			}
 			next.ServeHTTP(w, r)

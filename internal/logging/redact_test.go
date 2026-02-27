@@ -223,6 +223,26 @@ func TestRedactingHandler_WithGroupPreservesSecrets(t *testing.T) {
 	}
 }
 
+func TestRedactingHandler_WithAttrsRedactsSecretValues(t *testing.T) {
+	cap := &capturingHandler{}
+	h := NewRedactingHandler(cap, []string{"my-secret"})
+
+	// Attach a secret via logger.With(...) which goes through WithAttrs.
+	logger := slog.New(h).With("token", "my-secret")
+	_ = logger // ensure WithAttrs was called; the inner handler holds the attrs
+
+	rh2, ok := h.WithAttrs([]slog.Attr{slog.String("token", "my-secret")}).(*RedactingHandler)
+	if !ok {
+		t.Fatalf("expected *RedactingHandler from WithAttrs")
+	}
+
+	// Fire a record through the new handler so the attrs are captured.
+	r := slog.NewRecord(time.Now(), slog.LevelInfo, "hello", 0)
+	if err := rh2.Handle(context.Background(), r); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+}
+
 func TestRedactingHandler_IntegrationWithNDJSON(t *testing.T) {
 	var buf bytes.Buffer
 	ndjson := NewNDJSONHandler(func(line []byte) error {

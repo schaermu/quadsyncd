@@ -2094,7 +2094,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	}
 }
 
-func TestSecurityHeadersMiddleware_AllEndpoints(t *testing.T) {
+func TestSecurityHeadersMiddleware_UIAndAPIRoutes(t *testing.T) {
 	server, _ := setupServerWithRuns(t, nil)
 
 	// Build the same handler chain as StartWithListener.
@@ -2151,6 +2151,36 @@ func TestCSRFMiddleware_SetsCookieOnGetRoot(t *testing.T) {
 	}
 	if csrfCookie.Value == "" {
 		t.Error("csrf_token cookie value must not be empty")
+	}
+}
+
+func TestCSRFMiddleware_RegeneratesCookieWhenEmpty(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	// Send an empty csrf_token cookie — middleware should regenerate it.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: ""})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var found *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == csrfCookieName {
+			found = c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a new csrf_token cookie when existing cookie has empty value")
+	}
+	if found.Value == "" {
+		t.Error("regenerated csrf_token cookie value must not be empty")
 	}
 }
 
