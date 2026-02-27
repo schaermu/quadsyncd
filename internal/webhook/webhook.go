@@ -403,42 +403,100 @@ func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 	s.uiHandler.ServeHTTP(w, r)
 }
 
-// convertSyncPlanToRunstorePlan converts a sync.Plan to runstore.Plan format.
-func convertSyncPlanToRunstorePlan(syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary) runstore.Plan {
+// planAPIRequest is the optional JSON body accepted by POST /api/plan.
+type planAPIRequest struct {
+	RepoURL string `json:"repo_url,omitempty"`
+	Ref     string `json:"ref,omitempty"`
+	Commit  string `json:"commit,omitempty"` // takes precedence over Ref when set
+}
+
+// writePlanWithArtifacts converts a sync.Plan to runstore.Plan, persists before/after
+// artifacts for quadlet-only files, and returns the populated Plan ready for storage.
+// Non-quadlet companion files are never read or stored.
+// PlanOp.Path is stored relative to quadletDir for API stability.
+func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID string, syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary, quadletDir string, requested runstore.PlanRequest, logger *slog.Logger) runstore.Plan {
 	ops := make([]runstore.PlanOp, 0, len(syncPlan.Add)+len(syncPlan.Update)+len(syncPlan.Delete))
+	idx := 0
 
-	// Convert Add operations
+	relPath := func(abs string) string {
+		rel, err := filepath.Rel(quadletDir, abs)
+		if err != nil {
+			return abs // fallback: keep abs path rather than silently dropping
+		}
+		return filepath.ToSlash(rel)
+	}
+
+	writeArtifact := func(name string, path string) string {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			logger.Warn("plan artifact: failed to read file", "path", path, "error", err)
+			return ""
+		}
+		if err := store.WriteArtifact(ctx, runID, name, content); err != nil {
+			logger.Warn("plan artifact: failed to write artifact", "name", name, "error", err)
+			return ""
+		}
+		return name
+	}
+
 	for _, op := range syncPlan.Add {
-		ops = append(ops, runstore.PlanOp{
+		pOp := runstore.PlanOp{
 			Op:         "add",
-			Path:       op.DestPath,
+			Path:       relPath(op.DestPath),
 			SourceRepo: op.SourceRepo,
 			SourceRef:  op.SourceRef,
 			SourceSHA:  op.SourceSHA,
-		})
+		}
+		if quadlet.IsQuadletFile(op.DestPath) {
+			pOp.Unit = quadlet.UnitNameFromQuadlet(op.DestPath)
+			ext := filepath.Ext(op.DestPath)
+			afterName := fmt.Sprintf("%04d-after%s", idx, ext)
+			pOp.AfterPath = writeArtifact(afterName, op.SourcePath)
+		}
+		ops = append(ops, pOp)
+		idx++
 	}
 
-	// Convert Update operations
 	for _, op := range syncPlan.Update {
-		ops = append(ops, runstore.PlanOp{
+		pOp := runstore.PlanOp{
 			Op:         "update",
-			Path:       op.DestPath,
+			Path:       relPath(op.DestPath),
 			SourceRepo: op.SourceRepo,
 			SourceRef:  op.SourceRef,
 			SourceSHA:  op.SourceSHA,
-		})
+		}
+		if quadlet.IsQuadletFile(op.DestPath) {
+			pOp.Unit = quadlet.UnitNameFromQuadlet(op.DestPath)
+			ext := filepath.Ext(op.DestPath)
+			beforeName := fmt.Sprintf("%04d-before%s", idx, ext)
+			afterName := fmt.Sprintf("%04d-after%s", idx, ext)
+			// "before": current file on disk in quadletDir
+			pOp.BeforePath = writeArtifact(beforeName, op.DestPath)
+			// "after": incoming content from source checkout
+			pOp.AfterPath = writeArtifact(afterName, op.SourcePath)
+		}
+		ops = append(ops, pOp)
+		idx++
 	}
 
-	// Convert Delete operations
 	for _, op := range syncPlan.Delete {
-		ops = append(ops, runstore.PlanOp{
+		pOp := runstore.PlanOp{
 			Op:   "delete",
-			Path: op.DestPath,
-		})
+			Path: relPath(op.DestPath),
+		}
+		if quadlet.IsQuadletFile(op.DestPath) {
+			pOp.Unit = quadlet.UnitNameFromQuadlet(op.DestPath)
+			ext := filepath.Ext(op.DestPath)
+			beforeName := fmt.Sprintf("%04d-before%s", idx, ext)
+			// "before": current file on disk (what will be removed)
+			pOp.BeforePath = writeArtifact(beforeName, op.DestPath)
+		}
+		ops = append(ops, pOp)
+		idx++
 	}
 
 	return runstore.Plan{
-		Requested: runstore.PlanRequest{}, // UI-triggered plans don't specify a request scope
+		Requested: requested,
 		Conflicts: conflicts,
 		Ops:       ops,
 	}
@@ -455,6 +513,35 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+
+	// Parse optional JSON request body: { repo_url?, ref?, commit? }
+	var planReq planAPIRequest
+	dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	if err := dec.Decode(&planReq); err != nil {
+		// Treat empty body as "no body" for this optional request payload.
+		if !errors.Is(err, io.EOF) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: " + err.Error()})
+			return
+		}
+	} else {
+		// Reject trailing tokens to catch malformed JSON like "{}foo".
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: unexpected trailing data"})
+			return
+		}
+	}
+
+	// Validate: ref/commit without repo_url is ambiguous – reject it.
+	if planReq.RepoURL == "" && (planReq.Ref != "" || planReq.Commit != "") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "repo_url is required when ref or commit is specified"})
+		return
+	}
 
 	// Create initial run metadata for plan
 	meta := &runstore.RunMeta{
@@ -496,9 +583,36 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	teeHandler := logging.NewTeeHandler(s.logger.Handler(), redactedNDJSON)
 	logger := slog.New(teeHandler)
 
-	// Run sync in dry-run mode (plan)
-	logger.Info("performing plan operation")
-	engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, true)
+	// Build plan engine options: isolated workdir + optional per-repo overrides.
+	workDir, err := s.store.WorkDirForRun(meta.ID)
+	if err != nil {
+		s.logger.Error("failed to resolve workdir for plan run", "run_id", meta.ID, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to resolve plan workdir"})
+		return
+	}
+	planOpts := quadsyncd.PlanEngineOptions{
+		// Isolated checkout lives inside the run directory so it is automatically
+		// cleaned up when the run is pruned from the store.
+		WorkDir:    workDir,
+		RepoFilter: planReq.RepoURL,
+	}
+	if planReq.RepoURL != "" && (planReq.Ref != "" || planReq.Commit != "") {
+		planOpts.SpecOverrides = map[string]quadsyncd.SpecOverride{
+			planReq.RepoURL: {
+				Ref:    planReq.Ref,
+				Commit: planReq.Commit,
+			},
+		}
+	}
+
+	// Run sync in dry-run mode (plan) using isolated workdir.
+	logger.Info("performing plan operation",
+		"repo_url", planReq.RepoURL,
+		"ref", planReq.Ref,
+		"commit", planReq.Commit)
+	engine := quadsyncd.NewEngineWithPlanOptions(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, planOpts)
 	result, planErr := engine.Run(ctx)
 
 	// Finalize run metadata
@@ -541,9 +655,14 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist plan.json for plan runs
+	// Persist plan.json with before/after quadlet artifacts.
 	if result != nil && result.Plan != nil {
-		planData := convertSyncPlanToRunstorePlan(result.Plan, meta.Conflicts)
+		requested := runstore.PlanRequest{
+			RepoURL: planReq.RepoURL,
+			Ref:     planReq.Ref,
+			Commit:  planReq.Commit,
+		}
+		planData := writePlanWithArtifacts(ctx, s.store, meta.ID, result.Plan, meta.Conflicts, s.cfg.Paths.QuadletDir, requested, logger)
 		if err := s.store.WritePlan(ctx, meta.ID, planData); err != nil {
 			logger.Error("failed to persist plan.json", "error", err)
 		}
