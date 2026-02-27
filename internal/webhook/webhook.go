@@ -30,6 +30,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/runstore"
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
+	"github.com/schaermu/quadsyncd/internal/webui"
 )
 
 // GitHubPushEvent represents the relevant fields from a GitHub push webhook
@@ -59,6 +60,7 @@ type Server struct {
 	syncRunning bool       // whether a sync is currently in progress
 	syncPending bool       // whether another sync is needed after the current one
 	debounce    *debouncer
+	uiHandler   http.Handler // serves embedded SPA assets
 }
 
 // debouncer implements debouncing for webhook events
@@ -99,6 +101,13 @@ func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemdu
 		store:      store,
 		secret:     secret,
 	}
+
+	// Initialize the embedded SPA file server.
+	uiFS, err := webui.FS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open embedded webui assets: %w", err)
+	}
+	s.uiHandler = http.FileServer(http.FS(uiFS))
 
 	// Initialize debouncer with 2 second delay
 	s.debounce = &debouncer{
@@ -361,37 +370,37 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, "Sync triggered\n")
 }
 
-// handleRoot serves the Web UI SPA at the root path.
-// Currently returns a placeholder response; will serve the UI in future.
+// handleRoot serves the Web UI SPA from embedded assets.
+// For the exact root path or any path not matching /webhook, /api/, or
+// /assets/, it serves index.html to support client-side routing.
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
-	// Only handle exact root path and GET/HEAD methods
-	if r.URL.Path != "/" {
-		// Unknown paths should serve the UI entry for client-side routing
-		// For now, return 404; will serve UI index.html in future
-		http.NotFound(w, r)
-		return
-	}
-
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintf(w, "<!DOCTYPE html><html><head><title>quadsyncd</title></head><body><h1>quadsyncd Web UI</h1><p>Placeholder for Web UI MVP</p></body></html>\n")
+	// For the root path, serve index.html directly.
+	// For unknown paths (client-side routes like /runs, /plan, /units),
+	// also serve index.html so the SPA router can handle them.
+	if r.URL.Path == "/" {
+		s.uiHandler.ServeHTTP(w, r)
+		return
+	}
+
+	// Rewrite to /index.html for SPA client-side routing.
+	r.URL.Path = "/"
+	s.uiHandler.ServeHTTP(w, r)
 }
 
-// handleAssets serves static assets for the Web UI.
-// Currently returns a placeholder response; will serve actual assets in future.
+// handleAssets serves static assets for the Web UI from the embedded filesystem.
 func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Placeholder: return 404 for all assets until Web UI is implemented
-	http.NotFound(w, r)
+	// Serve directly from the embedded filesystem.
+	s.uiHandler.ServeHTTP(w, r)
 }
 
 // convertSyncPlanToRunstorePlan converts a sync.Plan to runstore.Plan format.
