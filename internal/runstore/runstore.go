@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,6 +18,14 @@ import (
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/multirepo"
+)
+
+// Sentinel errors for run and plan lookups.
+var (
+	// ErrRunNotFound is returned when a run ID does not exist or is invalid.
+	ErrRunNotFound = errors.New("run not found")
+	// ErrPlanNotFound is returned when no plan.json exists for a run.
+	ErrPlanNotFound = errors.New("plan not found")
 )
 
 // RunKind identifies the type of run.
@@ -145,12 +154,12 @@ func generateRunID() (string, error) {
 // Rejects path traversal sequences, absolute paths, and empty IDs.
 func (s *Store) safeRunDir(id string) (string, error) {
 	if id == "" {
-		return "", fmt.Errorf("run ID cannot be empty")
+		return "", fmt.Errorf("%w: ID cannot be empty", ErrRunNotFound)
 	}
 	// filepath.Base returns "." for empty, "/" for root, and strips any path separators.
 	// If the result differs from the input, the ID contains path separators or traversal.
 	if filepath.Base(id) != id {
-		return "", fmt.Errorf("invalid run ID (path traversal detected): %s", id)
+		return "", fmt.Errorf("%w: invalid run ID (path traversal detected): %s", ErrRunNotFound, id)
 	}
 	return filepath.Join(s.baseDir, id), nil
 }
@@ -225,7 +234,7 @@ func (s *Store) Update(ctx context.Context, meta *RunMeta) error {
 	metaPath := filepath.Join(runDir, "meta.json")
 	if _, err := os.Stat(metaPath); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("run not found: %s", meta.ID)
+			return fmt.Errorf("%w: %s", ErrRunNotFound, meta.ID)
 		}
 		return fmt.Errorf("failed to stat meta.json: %w", err)
 	}
@@ -248,7 +257,7 @@ func (s *Store) Get(ctx context.Context, id string) (*RunMeta, error) {
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("run not found: %s", id)
+			return nil, fmt.Errorf("%w: %s", ErrRunNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to read meta.json: %w", err)
 	}
@@ -401,7 +410,7 @@ func (s *Store) ReadPlan(ctx context.Context, id string) (*Plan, error) {
 	data, err := os.ReadFile(planPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("plan not found for run: %s", id)
+			return nil, fmt.Errorf("%w for run: %s", ErrPlanNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to read plan.json: %w", err)
 	}
