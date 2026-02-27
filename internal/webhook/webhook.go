@@ -385,7 +385,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rewrite to /index.html for SPA client-side routing.
+	// Rewrite to "/" so the file server returns index.html for SPA client-side routing.
 	// Clone the request to avoid mutating the original.
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/"

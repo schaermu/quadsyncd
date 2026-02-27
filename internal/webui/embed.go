@@ -4,6 +4,7 @@ package webui
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 )
 
