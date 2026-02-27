@@ -2062,3 +2062,217 @@ func TestHandleAPIRouting(t *testing.T) {
 		})
 	}
 }
+
+// ---- Security headers middleware ----
+
+func TestSecurityHeadersMiddleware(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := securityHeadersMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	tests := []struct {
+		header string
+		want   string
+	}{
+		{"X-Content-Type-Options", "nosniff"},
+		{"Referrer-Policy", "no-referrer"},
+		{"Permissions-Policy", "interest-cohort=()"},
+		{"Content-Security-Policy", cspPolicy},
+	}
+	for _, tt := range tests {
+		t.Run(tt.header, func(t *testing.T) {
+			got := w.Header().Get(tt.header)
+			if got != tt.want {
+				t.Errorf("%s: expected %q, got %q", tt.header, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestSecurityHeadersMiddleware_AllEndpoints(t *testing.T) {
+	server, _ := setupServerWithRuns(t, nil)
+
+	// Build the same handler chain as StartWithListener.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", server.handleRoot)
+	mux.HandleFunc("/api/", server.handleAPI)
+	handler := securityHeadersMiddleware(csrfMiddleware(mux))
+
+	for _, path := range []string{"/", "/api/overview"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+
+		if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: expected X-Content-Type-Options nosniff, got %q", path, got)
+		}
+		if got := w.Header().Get("Content-Security-Policy"); got != cspPolicy {
+			t.Errorf("%s: expected CSP header set, got %q", path, got)
+		}
+	}
+}
+
+// ---- CSRF middleware ----
+
+func TestCSRFMiddleware_SetsCookieOnGetRoot(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var csrfCookie *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == csrfCookieName {
+			csrfCookie = c
+			break
+		}
+	}
+	if csrfCookie == nil {
+		t.Fatal("expected csrf_token cookie to be set on GET /")
+	}
+	if csrfCookie.HttpOnly {
+		t.Error("csrf_token cookie must not be HttpOnly (JS must be able to read it)")
+	}
+	if csrfCookie.SameSite != http.SameSiteLaxMode {
+		t.Errorf("csrf_token cookie SameSite expected Lax, got %v", csrfCookie.SameSite)
+	}
+	if csrfCookie.Value == "" {
+		t.Error("csrf_token cookie value must not be empty")
+	}
+}
+
+func TestCSRFMiddleware_DoesNotSetCookieIfAlreadyPresent(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "existing-token"})
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	var count int
+	for _, c := range w.Result().Cookies() {
+		if c.Name == csrfCookieName {
+			count++
+		}
+	}
+	// No new cookie should be set when one already exists.
+	if count != 0 {
+		t.Errorf("expected no new csrf_token cookie when already present, got %d", count)
+	}
+}
+
+func TestCSRFMiddleware_PostMissingCookie(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when CSRF cookie missing, got %d", w.Code)
+	}
+}
+
+func TestCSRFMiddleware_PostMismatchHeader(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "real-token"})
+	req.Header.Set("X-CSRF-Token", "wrong-token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 on CSRF token mismatch, got %d", w.Code)
+	}
+}
+
+func TestCSRFMiddleware_PostMissingHeader(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "real-token"})
+	// No X-CSRF-Token header set.
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when X-CSRF-Token header missing, got %d", w.Code)
+	}
+}
+
+func TestCSRFMiddleware_PostValidToken(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	token := "abc123validtoken"
+	req := httptest.NewRequest(http.MethodPost, "/api/plan", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: token})
+	req.Header.Set("X-CSRF-Token", token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid CSRF token, got %d", w.Code)
+	}
+}
+
+func TestCSRFMiddleware_WebhookPathUnaffected(t *testing.T) {
+	// /webhook must pass through without CSRF checks (it uses HMAC-SHA256).
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	// POST to /webhook without cookie or header must still reach the inner handler.
+	req := httptest.NewRequest(http.MethodPost, "/webhook", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected /webhook to bypass CSRF (got %d)", w.Code)
+	}
+}
+
+func TestCSRFMiddleware_GetNonRootNoCSRFRequired(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	handler := csrfMiddleware(inner)
+
+	// GET requests to non-root paths don't need CSRF validation.
+	req := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected GET /api/runs to pass through without CSRF, got %d", w.Code)
+	}
+}
