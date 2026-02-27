@@ -77,9 +77,9 @@ type Engine struct {
 	systemd         systemduser.Systemd
 	logger          *slog.Logger
 	dryRun          bool
-	workDirOverride string                   // isolated checkout root for plan mode
-	specOverrides   map[string]SpecOverride  // per-repo ref/commit overrides
-	repoFilter      string                   // if set, only plan this repo URL
+	workDirOverride string                  // isolated checkout root for plan mode
+	specOverrides   map[string]SpecOverride // per-repo ref/commit overrides
+	repoFilter      string                  // if set, only plan this repo URL
 }
 
 // NewEngine creates a new sync engine using a single git client for all repos.
