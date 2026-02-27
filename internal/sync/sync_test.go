@@ -64,6 +64,10 @@ func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
 	return m.validateErr
 }
 
+func (m *mockSystemd) GetUnitStatus(_ context.Context, _ string) (string, error) {
+	return "inactive", nil
+}
+
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }

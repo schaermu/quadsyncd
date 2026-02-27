@@ -7,13 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -538,7 +538,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	repos := s.cfg.EffectiveRepositories()
 
 	// Best-effort: read state.json for current per-repo SHAs.
-	state, _ := loadSyncState(s.cfg.StateFilePath())
+	state, err := loadSyncState(s.cfg.StateFilePath())
+	if err != nil {
+		s.logger.Warn("failed to load sync state for overview", "error", err)
+	}
 
 	overviewRepos := make([]OverviewRepo, len(repos))
 	for i, spec := range repos {
@@ -573,6 +576,7 @@ type RunsListResponse struct {
 }
 
 // handleRuns serves GET /api/runs?limit=&cursor=.
+// Default limit is 20; maximum is 100. Logs use a higher limit (see handleRunLogs).
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -621,6 +625,8 @@ type RunLogsResponse struct {
 }
 
 // handleRunLogs serves GET /api/runs/{id}/logs?level=&component=&q=&since=&limit=&cursor=.
+// Default limit is 100; maximum is 1000. A higher limit than /api/runs is used because
+// a single run can produce many log lines.
 func (s *Server) handleRunLogs(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
@@ -727,7 +733,7 @@ func (s *Server) handleRunPlan(w http.ResponseWriter, r *http.Request, id string
 
 	plan, err := s.store.ReadPlan(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "plan not found") {
+		if errors.Is(err, runstore.ErrPlanNotFound) {
 			writeJSONError(w, http.StatusNotFound, "plan not found for run")
 			return
 		}
@@ -754,8 +760,11 @@ type UnitsResponse struct {
 }
 
 // handleUnits serves GET /api/units.
-func (s *Server) handleUnits(w http.ResponseWriter, r *http.Request) {
-	state, _ := loadSyncState(s.cfg.StateFilePath())
+func (s *Server) handleUnits(w http.ResponseWriter, _ *http.Request) {
+	state, err := loadSyncState(s.cfg.StateFilePath())
+	if err != nil {
+		s.logger.Warn("failed to load sync state for units", "error", err)
+	}
 
 	items := make([]UnitInfo, 0, len(state.ManagedFiles))
 	for destPath, mf := range state.ManagedFiles {
@@ -788,9 +797,8 @@ func (s *Server) handleTimer(w http.ResponseWriter, r *http.Request) {
 	ctxTimeout, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctxTimeout, "systemctl", "--user", "is-active", timerUnit)
-	out, _ := cmd.Output()
-	info.Active = strings.TrimSpace(string(out)) == "active"
+	status, _ := s.systemd.GetUnitStatus(ctxTimeout, timerUnit)
+	info.Active = status == "active"
 
 	writeJSON(w, http.StatusOK, info)
 }
@@ -829,20 +837,23 @@ func decodeCursor(cursor string) int {
 	return n
 }
 
-// paginateSlice returns a page of items and the next cursor (empty if no more pages).
+// paginateSlice returns a page of items starting at offset and the next cursor (empty if no more pages).
 func paginateSlice[T any](items []T, offset, limit int) ([]T, string) {
 	if offset >= len(items) {
 		return []T{}, ""
 	}
 	end := offset + limit
-	var nextCursor string
+	var (
+		nextCursor string
+		page       []T
+	)
 	if end < len(items) {
 		nextCursor = encodeCursor(end)
-		items = items[offset:end]
+		page = items[offset:end]
 	} else {
-		items = items[offset:]
+		page = items[offset:]
 	}
-	return items, nextCursor
+	return page, nextCursor
 }
 
 // loadSyncState reads state.json from the given path.
@@ -865,15 +876,9 @@ func loadSyncState(stateFilePath string) (quadsyncd.State, error) {
 	return state, nil
 }
 
-// isNotFoundErr reports whether err indicates a missing run or invalid ID.
+// isNotFoundErr reports whether err indicates a missing or invalid run.
 func isNotFoundErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.HasPrefix(msg, "run not found") ||
-		strings.HasPrefix(msg, "invalid run ID") ||
-		strings.HasPrefix(msg, "run ID cannot be empty")
+	return errors.Is(err, runstore.ErrRunNotFound)
 }
 
 // verifySignature verifies the GitHub webhook signature

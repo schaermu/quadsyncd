@@ -21,6 +21,9 @@ type Systemd interface {
 	// validate that the quadlet files can be converted into systemd units.
 	// quadletDir is the directory containing the quadlet files to validate.
 	ValidateQuadlets(ctx context.Context, quadletDir string) error
+	// GetUnitStatus returns the active state of a systemd user unit.
+	// Returns "active", "inactive", "failed", etc. on a best-effort basis.
+	GetUnitStatus(ctx context.Context, unit string) (string, error)
 }
 
 // Client implements Systemd by shelling out to systemctl --user
