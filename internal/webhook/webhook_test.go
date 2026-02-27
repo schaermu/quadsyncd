@@ -1315,3 +1315,667 @@ Restart=always
 		}
 	})
 }
+
+// ---- helpers for new API tests ----
+
+// setupServerWithRuns creates a server and pre-populates the runstore
+// with the given run metas (stored as-is, not executed).
+func setupServerWithRuns(t *testing.T, runs []runstore.RunMeta) (*Server, *runstore.Store) {
+t.Helper()
+cfg, _ := setupTestConfig(t)
+
+if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+t.Fatalf("MkdirAll quadlet: %v", err)
+}
+if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+t.Fatalf("MkdirAll state: %v", err)
+}
+
+logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+store := runstore.NewStore(cfg.Paths.StateDir, logger)
+
+ctx := context.Background()
+for i := range runs {
+if err := store.Create(ctx, &runs[i]); err != nil {
+t.Fatalf("store.Create: %v", err)
+}
+if err := store.Update(ctx, &runs[i]); err != nil {
+t.Fatalf("store.Update: %v", err)
+}
+}
+
+server, err := NewServer(cfg, mockGitFactory(&mockGitClient{}), &mockSystemd{}, store, logger)
+if err != nil {
+t.Fatalf("NewServer: %v", err)
+}
+return server, store
+}
+
+func makeRun(kind runstore.RunKind, trigger runstore.TriggerSource, status runstore.RunStatus) runstore.RunMeta {
+now := time.Now().UTC()
+ended := now.Add(2 * time.Second)
+return runstore.RunMeta{
+Kind:      kind,
+Trigger:   trigger,
+StartedAt: now,
+EndedAt:   &ended,
+Status:    status,
+DryRun:    kind == runstore.RunKindPlan,
+Revisions: map[string]string{"https://github.com/test/repo.git": "abc123"},
+Conflicts: []runstore.ConflictSummary{},
+}
+}
+
+func requireJSONContentType(t *testing.T, rec *httptest.ResponseRecorder) {
+t.Helper()
+ct := rec.Header().Get("Content-Type")
+if !strings.HasPrefix(ct, "application/json") {
+t.Errorf("expected Content-Type application/json, got %q", ct)
+}
+}
+
+// ---- GET /api/overview ----
+
+func TestHandleOverview(t *testing.T) {
+run := makeRun(runstore.RunKindSync, runstore.TriggerTimer, runstore.RunStatusSuccess)
+server, _ := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+t.Run("returns 200 with expected fields", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var resp OverviewResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Repositories) == 0 {
+t.Error("expected at least one repository")
+}
+if resp.Repositories[0].URL == "" {
+t.Error("expected repository URL")
+}
+if resp.Repositories[0].Ref == "" {
+t.Error("expected repository Ref")
+}
+if resp.LastRunID == "" {
+t.Error("expected last_run_id")
+}
+if resp.LastRunStatus != string(runstore.RunStatusSuccess) {
+t.Errorf("expected last_run_status success, got %q", resp.LastRunStatus)
+}
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/overview", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+
+t.Run("returns 200 with empty runs", func(t *testing.T) {
+emptyServer, _ := setupServerWithRuns(t, nil)
+req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+w := httptest.NewRecorder()
+emptyServer.handleAPI(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp OverviewResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if resp.LastRunID != "" {
+t.Error("expected no last_run_id when no runs exist")
+}
+})
+}
+
+// ---- GET /api/runs ----
+
+func TestHandleRuns(t *testing.T) {
+runs := []runstore.RunMeta{
+makeRun(runstore.RunKindSync, runstore.TriggerTimer, runstore.RunStatusSuccess),
+makeRun(runstore.RunKindPlan, runstore.TriggerUI, runstore.RunStatusSuccess),
+}
+server, _ := setupServerWithRuns(t, runs)
+
+t.Run("returns 200 with items array", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var resp RunsListResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 2 {
+t.Errorf("expected 2 items, got %d", len(resp.Items))
+}
+})
+
+t.Run("pagination with limit=1", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs?limit=1", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunsListResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 1 {
+t.Errorf("expected 1 item, got %d", len(resp.Items))
+}
+if resp.NextCursor == "" {
+t.Error("expected next_cursor when more items exist")
+}
+
+// Follow cursor
+req2 := httptest.NewRequest(http.MethodGet, "/api/runs?limit=1&cursor="+resp.NextCursor, nil)
+w2 := httptest.NewRecorder()
+server.handleAPI(w2, req2)
+if w2.Code != http.StatusOK {
+t.Fatalf("cursor page: expected 200, got %d", w2.Code)
+}
+var resp2 RunsListResponse
+if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+t.Fatalf("decode page 2: %v", err)
+}
+if len(resp2.Items) != 1 {
+t.Errorf("expected 1 item on page 2, got %d", len(resp2.Items))
+}
+if resp2.NextCursor != "" {
+t.Error("expected no next_cursor on last page")
+}
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/runs", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+
+t.Run("empty store returns empty items array", func(t *testing.T) {
+emptyServer, _ := setupServerWithRuns(t, nil)
+req := httptest.NewRequest(http.MethodGet, "/api/runs", nil)
+w := httptest.NewRecorder()
+emptyServer.handleAPI(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunsListResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if resp.Items == nil {
+t.Error("items should not be null")
+}
+})
+}
+
+// ---- GET /api/runs/{id} ----
+
+func TestHandleRunDetail(t *testing.T) {
+run := makeRun(runstore.RunKindSync, runstore.TriggerWebhook, runstore.RunStatusSuccess)
+server, store := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+// Retrieve the actual ID assigned by the store.
+ctx := context.Background()
+allRuns, _ := store.List(ctx)
+runID := allRuns[0].ID
+
+t.Run("returns full run meta", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID, nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var meta runstore.RunMeta
+if err := json.NewDecoder(w.Body).Decode(&meta); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if meta.ID != runID {
+t.Errorf("expected ID %q, got %q", runID, meta.ID)
+}
+if meta.Kind != runstore.RunKindSync {
+t.Errorf("expected kind sync, got %s", meta.Kind)
+}
+if meta.Status != runstore.RunStatusSuccess {
+t.Errorf("expected status success, got %s", meta.Status)
+}
+})
+
+t.Run("returns 404 for unknown run", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/nonexistent-run-id", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusNotFound {
+t.Errorf("expected 404, got %d", w.Code)
+}
+requireJSONContentType(t, w)
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/runs/"+runID, nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+}
+
+// ---- GET /api/runs/{id}/logs ----
+
+func TestHandleRunLogs(t *testing.T) {
+run := makeRun(runstore.RunKindSync, runstore.TriggerTimer, runstore.RunStatusSuccess)
+server, store := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+ctx := context.Background()
+allRuns, _ := store.List(ctx)
+runID := allRuns[0].ID
+
+// Write some log lines.
+logLines := []string{
+`{"time":"2026-01-01T10:00:00Z","level":"INFO","msg":"starting sync","component":"engine"}`,
+`{"time":"2026-01-01T10:00:01Z","level":"DEBUG","msg":"checking files","component":"engine"}`,
+`{"time":"2026-01-01T10:00:02Z","level":"ERROR","msg":"something failed","component":"git"}`,
+`{"time":"2026-01-01T10:00:03Z","level":"INFO","msg":"sync complete","component":"engine"}`,
+}
+for _, line := range logLines {
+if err := store.AppendLog(ctx, runID, []byte(line)); err != nil {
+t.Fatalf("AppendLog: %v", err)
+}
+}
+
+t.Run("returns all logs", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 4 {
+t.Errorf("expected 4 log records, got %d", len(resp.Items))
+}
+})
+
+t.Run("filter by level=ERROR", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?level=error", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 1 {
+t.Errorf("expected 1 ERROR record, got %d", len(resp.Items))
+}
+if msg, _ := resp.Items[0]["msg"].(string); msg != "something failed" {
+t.Errorf("unexpected msg %q", msg)
+}
+})
+
+t.Run("filter by component=git", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?component=git", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 1 {
+t.Errorf("expected 1 git record, got %d", len(resp.Items))
+}
+})
+
+t.Run("filter by q=complete", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?q=complete", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 1 {
+t.Errorf("expected 1 record matching 'complete', got %d", len(resp.Items))
+}
+})
+
+t.Run("filter by since", func(t *testing.T) {
+// since=2026-01-01T10:00:01Z should return records strictly after that time
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?since=2026-01-01T10:00:01Z", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+// records at 10:00:02 and 10:00:03 are after the since time
+if len(resp.Items) != 2 {
+t.Errorf("expected 2 records after since, got %d", len(resp.Items))
+}
+})
+
+t.Run("pagination with limit=2", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?limit=2", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d", w.Code)
+}
+var resp RunLogsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 2 {
+t.Errorf("expected 2 items on first page, got %d", len(resp.Items))
+}
+if resp.NextCursor == "" {
+t.Error("expected next_cursor")
+}
+})
+
+t.Run("returns 404 for unknown run", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/nonexistent/logs", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusNotFound {
+t.Errorf("expected 404, got %d", w.Code)
+}
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/runs/"+runID+"/logs", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+}
+
+// ---- GET /api/runs/{id}/plan ----
+
+func TestHandleRunPlan(t *testing.T) {
+run := makeRun(runstore.RunKindPlan, runstore.TriggerUI, runstore.RunStatusSuccess)
+server, store := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+ctx := context.Background()
+allRuns, _ := store.List(ctx)
+runID := allRuns[0].ID
+
+// Write a plan.
+plan := runstore.Plan{
+Requested: runstore.PlanRequest{},
+Conflicts: []runstore.ConflictSummary{},
+Ops: []runstore.PlanOp{
+{Op: "add", Path: "/home/user/.config/containers/systemd/test.container", SourceRepo: "https://github.com/test/repo.git"},
+},
+}
+if err := store.WritePlan(ctx, runID, plan); err != nil {
+t.Fatalf("WritePlan: %v", err)
+}
+
+t.Run("returns plan JSON", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/plan", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var p runstore.Plan
+if err := json.NewDecoder(w.Body).Decode(&p); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(p.Ops) != 1 {
+t.Errorf("expected 1 op, got %d", len(p.Ops))
+}
+if p.Ops[0].Op != "add" {
+t.Errorf("expected op 'add', got %q", p.Ops[0].Op)
+}
+})
+
+t.Run("returns 404 when no plan exists", func(t *testing.T) {
+// Create a sync run (no plan.json).
+syncRun := makeRun(runstore.RunKindSync, runstore.TriggerTimer, runstore.RunStatusSuccess)
+if err := store.Create(ctx, &syncRun); err != nil {
+t.Fatalf("store.Create: %v", err)
+}
+if err := store.Update(ctx, &syncRun); err != nil {
+t.Fatalf("store.Update: %v", err)
+}
+req := httptest.NewRequest(http.MethodGet, "/api/runs/"+syncRun.ID+"/plan", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusNotFound {
+t.Errorf("expected 404, got %d", w.Code)
+}
+})
+
+t.Run("returns 404 for unknown run", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/runs/nonexistent/plan", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusNotFound {
+t.Errorf("expected 404, got %d", w.Code)
+}
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/runs/"+runID+"/plan", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+}
+
+// ---- GET /api/units ----
+
+func TestHandleUnits(t *testing.T) {
+server, _ := setupServerWithRuns(t, nil)
+
+t.Run("returns empty items when no state.json", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/units", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var resp UnitsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if resp.Items == nil {
+t.Error("items should not be null")
+}
+})
+
+t.Run("returns units from state.json", func(t *testing.T) {
+cfg, _ := setupTestConfig(t)
+if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+t.Fatalf("MkdirAll: %v", err)
+}
+
+// Write a minimal state.json.
+stateContent := `{
+"managed_files": {
+"/home/user/.config/containers/systemd/app.container": {
+"source_path": "app.container",
+"hash": "abc123",
+"source_repo": "https://github.com/test/repo.git",
+"source_ref": "refs/heads/main",
+"source_sha": "deadbeef"
+}
+}
+}`
+if err := os.WriteFile(cfg.StateFilePath(), []byte(stateContent), 0644); err != nil {
+t.Fatalf("WriteFile state: %v", err)
+}
+
+logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+store := runstore.NewStore(cfg.Paths.StateDir, logger)
+srv, err := NewServer(cfg, mockGitFactory(&mockGitClient{}), &mockSystemd{}, store, logger)
+if err != nil {
+t.Fatalf("NewServer: %v", err)
+}
+
+req := httptest.NewRequest(http.MethodGet, "/api/units", nil)
+w := httptest.NewRecorder()
+srv.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+var resp UnitsResponse
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if len(resp.Items) != 1 {
+t.Fatalf("expected 1 unit, got %d", len(resp.Items))
+}
+u := resp.Items[0]
+if u.Name != "app.service" {
+t.Errorf("expected unit name app.service, got %q", u.Name)
+}
+if u.SourceRepo != "https://github.com/test/repo.git" {
+t.Errorf("unexpected source_repo %q", u.SourceRepo)
+}
+if u.Hash != "abc123" {
+t.Errorf("unexpected hash %q", u.Hash)
+}
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/units", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+}
+
+// ---- GET /api/timer ----
+
+func TestHandleTimer(t *testing.T) {
+server, _ := setupServerWithRuns(t, nil)
+
+t.Run("returns 200 with timer unit field", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodGet, "/api/timer", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+
+if w.Code != http.StatusOK {
+t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+
+var resp TimerInfo
+if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+t.Fatalf("decode: %v", err)
+}
+if resp.Unit != "quadsyncd-sync.timer" {
+t.Errorf("expected unit quadsyncd-sync.timer, got %q", resp.Unit)
+}
+// active will be false in CI/test env; just ensure it's present (bool field)
+})
+
+t.Run("POST returns 405", func(t *testing.T) {
+req := httptest.NewRequest(http.MethodPost, "/api/timer", nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != http.StatusMethodNotAllowed {
+t.Errorf("expected 405, got %d", w.Code)
+}
+})
+}
+
+// ---- routing edge cases ----
+
+func TestHandleAPIRouting(t *testing.T) {
+server, _ := setupServerWithRuns(t, nil)
+
+tests := []struct {
+name           string
+method         string
+path           string
+expectedStatus int
+}{
+// Unimplemented paths still return 501
+{"unknown path", http.MethodGet, "/api/status", http.StatusNotImplemented},
+{"trailing slash on runs", http.MethodGet, "/api/runs/", http.StatusNotImplemented},
+{"deep unknown subpath", http.MethodGet, "/api/runs/abc/def/ghi", http.StatusNotImplemented},
+// Implemented paths with correct method
+{"overview", http.MethodGet, "/api/overview", http.StatusOK},
+{"runs list", http.MethodGet, "/api/runs", http.StatusOK},
+{"units", http.MethodGet, "/api/units", http.StatusOK},
+{"timer", http.MethodGet, "/api/timer", http.StatusOK},
+}
+
+for _, tt := range tests {
+t.Run(tt.name, func(t *testing.T) {
+req := httptest.NewRequest(tt.method, tt.path, nil)
+w := httptest.NewRecorder()
+server.handleAPI(w, req)
+if w.Code != tt.expectedStatus {
+t.Errorf("expected %d, got %d (body: %s)", tt.expectedStatus, w.Code, w.Body.String())
+}
+requireJSONContentType(t, w)
+})
+}
+}
