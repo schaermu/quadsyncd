@@ -18,5 +18,9 @@ var assets embed.FS
 // "dist" prefix so callers can serve files directly (e.g. index.html,
 // assets/index-xxx.js).
 func FS() (fs.FS, error) {
-	return fs.Sub(assets, "dist")
+	sub, err := fs.Sub(assets, "dist")
+	if err != nil {
+		return nil, fmt.Errorf("embedded webui dist sub-filesystem: %w", err)
+	}
+	return sub, nil
 }

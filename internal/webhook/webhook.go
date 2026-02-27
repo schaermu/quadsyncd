@@ -380,16 +380,16 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// For the root path, serve index.html directly.
-	// For unknown paths (client-side routes like /runs, /plan, /units),
-	// also serve index.html so the SPA router can handle them.
 	if r.URL.Path == "/" {
 		s.uiHandler.ServeHTTP(w, r)
 		return
 	}
 
 	// Rewrite to /index.html for SPA client-side routing.
-	r.URL.Path = "/"
-	s.uiHandler.ServeHTTP(w, r)
+	// Clone the request to avoid mutating the original.
+	r2 := r.Clone(r.Context())
+	r2.URL.Path = "/"
+	s.uiHandler.ServeHTTP(w, r2)
 }
 
 // handleAssets serves static assets for the Web UI from the embedded filesystem.
