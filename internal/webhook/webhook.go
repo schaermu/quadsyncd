@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,6 +51,7 @@ type Server struct {
 	systemd     systemduser.Systemd
 	logger      *slog.Logger
 	store       *runstore.Store
+	broadcaster *Broadcaster
 	secret      []byte
 	syncMu      sync.Mutex // guards syncRunning and syncPending
 	syncRunning bool       // whether a sync is currently in progress
@@ -101,6 +103,10 @@ func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemdu
 		delay: 2 * time.Second,
 	}
 
+	// Initialize SSE broadcaster watching the runs directory.
+	runsDir := filepath.Join(cfg.Paths.StateDir, "runs")
+	s.broadcaster = newBroadcaster(runsDir, logger, defaultBroadcastInterval)
+
 	return s, nil
 }
 
@@ -122,6 +128,9 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 	s.logger.Info("performing initial sync before starting webhook server")
 	s.performSync(ctx, runstore.TriggerStartup)
 
+	// Start the SSE broadcaster in the background.
+	go s.broadcaster.Run(ctx)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhook", s.handleWebhook)
 	mux.HandleFunc("/", s.handleRoot)
@@ -133,9 +142,12 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 		Handler:           mux,
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20, // 1 MB
+		// WriteTimeout applies to all endpoints. Long-lived SSE connections on
+		// GET /api/events explicitly clear their write deadline per-connection
+		// via http.ResponseController inside handleEvents.
+		WriteTimeout:   30 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
 
 	// Start server in goroutine
@@ -481,6 +493,13 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		s.handleTimer(w, r)
 		return
+	case "/api/events":
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+			return
+		}
+		s.handleEvents(w, r)
+		return
 	}
 
 	// Routes under /api/runs/{id}[/logs|/plan]
@@ -801,6 +820,66 @@ func (s *Server) handleTimer(w http.ResponseWriter, r *http.Request) {
 	info.Active = status == "active"
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+// handleEvents serves GET /api/events as a Server-Sent Events stream.
+// It streams run lifecycle events (run_started, run_updated, log_appended, plan_ready)
+// in real-time by subscribing to the disk-backed Broadcaster.
+//
+// The write deadline is cleared per-connection via http.ResponseController so the
+// 30s server-level WriteTimeout does not terminate long-lived SSE connections.
+// Keep-alive comments (": ping") are sent every 15 seconds to prevent proxy timeouts.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	// Set SSE headers before the first write commits the status code.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Prevent nginx/caddy from buffering the stream.
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Clear the per-connection write deadline so the connection is not cut
+	// by the server-level WriteTimeout (which is 0, but belt-and-suspenders).
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	// Send initial keep-alive comment; this also flushes the response headers.
+	_, _ = fmt.Fprintf(w, ": ping\n\n")
+	_ = rc.Flush()
+
+	ch := s.broadcaster.subscribe()
+	defer s.broadcaster.unsubscribe(ch)
+
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			b, err := formatSSEEvent(ev)
+			if err != nil {
+				s.logger.Warn("failed to format SSE event", "kind", ev.kind, "error", err)
+				continue
+			}
+			if _, err := w.Write(b); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
+				return
+			}
+		case <-keepAlive.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			if err := rc.Flush(); err != nil {
+				return
+			}
+		}
+	}
 }
 
 // writeJSON encodes v as JSON and writes it with the given status code.
