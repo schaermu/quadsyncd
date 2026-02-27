@@ -959,7 +959,7 @@ func makeEvent(fullName, cloneURL, sshURL, ref string) GitHubPushEvent {
 	return e
 }
 
-// TestHandleRoot verifies the root path returns HTML for the Web UI placeholder.
+// TestHandleRoot verifies the root path returns HTML for the Web UI SPA.
 func TestHandleRoot(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -986,7 +986,7 @@ func TestHandleRoot(t *testing.T) {
 			path:           "/",
 			expectedStatus: http.StatusOK,
 			checkBody:      true,
-			bodyContains:   "quadsyncd Web UI",
+			bodyContains:   "quadsyncd",
 		},
 		{
 			name:           "HEAD / returns 200",
@@ -1003,11 +1003,12 @@ func TestHandleRoot(t *testing.T) {
 			checkBody:      false,
 		},
 		{
-			name:           "unknown path returns 404",
+			name:           "unknown path returns 200 with SPA index",
 			method:         http.MethodGet,
 			path:           "/unknown",
-			expectedStatus: http.StatusNotFound,
-			checkBody:      false,
+			expectedStatus: http.StatusOK,
+			checkBody:      true,
+			bodyContains:   "quadsyncd",
 		},
 	}
 
@@ -1035,7 +1036,7 @@ func TestHandleRoot(t *testing.T) {
 	}
 }
 
-// TestHandleAssets verifies the /assets/* path returns 404 for now.
+// TestHandleAssets verifies the /assets/* path serves embedded static assets.
 func TestHandleAssets(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -1055,15 +1056,9 @@ func TestHandleAssets(t *testing.T) {
 		expectedStatus int
 	}{
 		{
-			name:           "GET /assets/app.js returns 404",
+			name:           "GET /assets/nonexistent returns 404",
 			method:         http.MethodGet,
-			path:           "/assets/app.js",
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "HEAD /assets/style.css returns 404",
-			method:         http.MethodHead,
-			path:           "/assets/style.css",
+			path:           "/assets/nonexistent.js",
 			expectedStatus: http.StatusNotFound,
 		},
 		{

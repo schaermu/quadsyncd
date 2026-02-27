@@ -27,6 +27,7 @@ vendor/
 
 # goreleaser
 dist/
+!internal/webui/dist/
 
 # Local configuration and state
 config.yaml
@@ -48,3 +49,8 @@ Thumbs.db
 # Local state directories (for testing)
 .state/
 .local/
+
+# Web UI
+webui/node_modules/
+webui/dist/
+webui/.vscode/

@@ -1,6 +1,6 @@
 BINARY ?= quadsyncd
 
-.PHONY: all fmt test lint vuln build clean install
+.PHONY: all fmt test lint vuln build build-webui clean install
 
 all: fmt test lint build
 
@@ -20,7 +20,13 @@ vuln:
 	@echo "==> Checking for vulnerabilities..."
 	@go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-build:
+build-webui:
+	@echo "==> Building web UI..."
+	@cd webui && npm ci && npm run build
+	@rm -rf internal/webui/dist
+	@cp -r webui/dist internal/webui/dist
+
+build: build-webui
 	@echo "==> Building binary..."
 	@go build -trimpath -o $(BINARY) ./cmd/quadsyncd
 
