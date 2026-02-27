@@ -1413,3 +1413,396 @@ func TestBuildStateFromEffective_ProvenanceRecorded(t *testing.T) {
 		t.Errorf("SourceSHA = %q, want abc123", mf.SourceSHA)
 	}
 }
+
+// ---- plan engine options and drift-aware tests ----
+
+func TestNewEngineWithPlanOptions_IsolatedWorkDir(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+stateDir := filepath.Join(tmpDir, "state")
+liveRepoDir := filepath.Join(stateDir, "repos")
+workDir := filepath.Join(tmpDir, "workdir")
+
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(stateDir, 0755); err != nil {
+t.Fatal(err)
+}
+// Place a sentinel file in the live repo dir to detect if it is touched.
+if err := os.MkdirAll(liveRepoDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Repository: &config.RepoSpec{
+URL:    "https://github.com/test/repo.git",
+Ref:    "refs/heads/main",
+Subdir: "",
+},
+Paths: config.PathsConfig{
+QuadletDir: quadletDir,
+StateDir:   stateDir,
+},
+Sync: config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+
+checkedOutTo := ""
+mockGit := &mockGitClient{
+commitHash: "plan-sha",
+repoSetup: func(destDir string) {
+checkedOutTo = destDir
+// Write a test quadlet file into the checkout dir.
+if err := os.MkdirAll(destDir, 0755); err != nil {
+t.Fatalf("repoSetup MkdirAll: %v", err)
+}
+if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=alpine\n"), 0644); err != nil {
+t.Fatalf("repoSetup WriteFile: %v", err)
+}
+},
+}
+
+factory := func(_ config.AuthConfig) git.Client { return mockGit }
+sys := &mockSystemd{}
+
+opts := PlanEngineOptions{WorkDir: workDir}
+engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), sys, testLogger(), opts)
+
+result, err := engine.Run(context.Background())
+if err != nil {
+t.Fatalf("Run: %v", err)
+}
+if result == nil || result.Plan == nil {
+t.Fatal("expected non-nil result and plan")
+}
+
+// The checkout must have gone to the isolated workdir, not the live repo dir.
+if checkedOutTo == "" {
+t.Fatal("mockGit was never called")
+}
+if !strings.HasPrefix(checkedOutTo, workDir) {
+t.Errorf("checkout dir %q does not start with workDir %q", checkedOutTo, workDir)
+}
+if strings.HasPrefix(checkedOutTo, liveRepoDir) {
+t.Errorf("checkout dir %q should not be inside liveRepoDir %q", checkedOutTo, liveRepoDir)
+}
+
+// Plan should contain exactly one add op for app.container.
+if len(result.Plan.Add) != 1 {
+t.Errorf("plan.Add count = %d, want 1", len(result.Plan.Add))
+}
+if len(result.Plan.Update) != 0 {
+t.Errorf("plan.Update count = %d, want 0", len(result.Plan.Update))
+}
+}
+
+func TestNewEngineWithPlanOptions_SpecOverride_Commit(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+stateDir := filepath.Join(tmpDir, "state")
+workDir := filepath.Join(tmpDir, "workdir")
+
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(stateDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+const repoURL = "https://github.com/test/repo.git"
+cfg := &config.Config{
+Repository: &config.RepoSpec{
+URL:    repoURL,
+Ref:    "refs/heads/main",
+Subdir: "",
+},
+Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+Sync:  config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+
+var usedRef string
+mockGit := &mockGitClient{
+commitHash: "override-sha",
+repoSetup: func(destDir string) {
+if err := os.MkdirAll(destDir, 0755); err != nil {
+t.Fatalf("repoSetup MkdirAll: %v", err)
+}
+if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=alpine\n"), 0644); err != nil {
+t.Fatalf("repoSetup WriteFile: %v", err)
+}
+},
+}
+// Capture the ref passed to EnsureCheckout by wrapping the mock.
+capturingFactory := func(_ config.AuthConfig) git.Client {
+return &capturingGitClient{inner: mockGit, usedRef: &usedRef}
+}
+
+opts := PlanEngineOptions{
+WorkDir: workDir,
+SpecOverrides: map[string]SpecOverride{
+repoURL: {Commit: "deadbeef"},
+},
+}
+engine := NewEngineWithPlanOptions(cfg, GitClientFactory(capturingFactory), &mockSystemd{}, testLogger(), opts)
+
+if _, err := engine.Run(context.Background()); err != nil {
+t.Fatalf("Run: %v", err)
+}
+
+if usedRef != "deadbeef" {
+t.Errorf("ref passed to git = %q, want %q", usedRef, "deadbeef")
+}
+}
+
+func TestNewEngineWithPlanOptions_SpecOverride_Ref(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+stateDir := filepath.Join(tmpDir, "state")
+workDir := filepath.Join(tmpDir, "workdir")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(stateDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+const repoURL = "https://github.com/test/repo.git"
+cfg := &config.Config{
+Repository: &config.RepoSpec{URL: repoURL, Ref: "refs/heads/main"},
+Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+Sync:       config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+
+var usedRef string
+mockGit := &mockGitClient{
+commitHash: "sha-for-feature",
+repoSetup: func(destDir string) {
+if err := os.MkdirAll(destDir, 0755); err != nil {
+t.Fatalf("repoSetup MkdirAll: %v", err)
+}
+},
+}
+factory := func(_ config.AuthConfig) git.Client {
+return &capturingGitClient{inner: mockGit, usedRef: &usedRef}
+}
+
+opts := PlanEngineOptions{
+WorkDir: workDir,
+SpecOverrides: map[string]SpecOverride{
+repoURL: {Ref: "refs/heads/feature"},
+},
+}
+engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &mockSystemd{}, testLogger(), opts)
+_, _ = engine.Run(context.Background()) // no quadlet files – result may be empty
+
+if usedRef != "refs/heads/feature" {
+t.Errorf("ref = %q, want refs/heads/feature", usedRef)
+}
+}
+
+func TestNewEngineWithPlanOptions_RepoFilter(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+stateDir := filepath.Join(tmpDir, "state")
+workDir := filepath.Join(tmpDir, "workdir")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(stateDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Repositories: []config.RepoSpec{
+{URL: "https://github.com/test/repo1.git", Ref: "refs/heads/main"},
+{URL: "https://github.com/test/repo2.git", Ref: "refs/heads/main"},
+},
+Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+Sync:  config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+
+calledURLs := []string{}
+factory := func(_ config.AuthConfig) git.Client {
+return &trackingURLGitClient{urls: &calledURLs}
+}
+
+opts := PlanEngineOptions{
+WorkDir:    workDir,
+RepoFilter: "https://github.com/test/repo1.git",
+}
+engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &mockSystemd{}, testLogger(), opts)
+_, _ = engine.Run(context.Background())
+
+if len(calledURLs) != 1 || calledURLs[0] != "https://github.com/test/repo1.git" {
+t.Errorf("calledURLs = %v, want [repo1]", calledURLs)
+}
+}
+
+func TestNewEngineWithPlanOptions_RepoFilter_NoMatch(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+stateDir := filepath.Join(tmpDir, "state")
+workDir := filepath.Join(tmpDir, "workdir")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(stateDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Repository: &config.RepoSpec{URL: "https://github.com/test/repo.git", Ref: "refs/heads/main"},
+Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
+Sync:       config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+
+opts := PlanEngineOptions{
+WorkDir:    workDir,
+RepoFilter: "https://github.com/test/DOES-NOT-EXIST.git",
+}
+engine := NewEngineWithPlanOptions(cfg, nil, &mockSystemd{}, testLogger(), opts)
+_, err := engine.Run(context.Background())
+if err == nil {
+t.Fatal("expected error when repo_filter matches no configured repo")
+}
+}
+
+func TestBuildPlanDriftAware_DriftedFileShowsUpdate(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+srcDir := filepath.Join(tmpDir, "src")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(srcDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+// Desired content (from source repo)
+desiredContent := "[Container]\nImage=nginx:latest\n"
+// Current on-disk content has DRIFTED (manually edited)
+driftedContent := "[Container]\nImage=nginx:1.23\n"
+
+if err := os.WriteFile(filepath.Join(srcDir, "app.container"), []byte(desiredContent), 0644); err != nil {
+t.Fatal(err)
+}
+// Simulate drifted file in quadletDir
+if err := os.WriteFile(filepath.Join(quadletDir, "app.container"), []byte(driftedContent), 0644); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
+Sync:  config.SyncConfig{Prune: false, Restart: config.RestartChanged},
+}
+// dryRun=true triggers drift-aware comparison
+engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+
+// State says the file was last synced (same hash as drifted – simulating state mismatch)
+driftedHash, _ := fileHash(filepath.Join(quadletDir, "app.container"))
+prevState := &State{
+ManagedFiles: map[string]ManagedFile{
+filepath.Join(quadletDir, "app.container"): {Hash: driftedHash},
+},
+}
+
+plan := buildPlanFromDir(t, engine, srcDir, prevState)
+
+// Desired != drifted → should produce an update op
+if len(plan.Update) != 1 {
+t.Errorf("plan.Update count = %d, want 1 (drift not detected)", len(plan.Update))
+}
+if len(plan.Add) != 0 {
+t.Errorf("plan.Add count = %d, want 0", len(plan.Add))
+}
+}
+
+func TestBuildPlanDriftAware_UpToDateFileNoOp(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+srcDir := filepath.Join(tmpDir, "src")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(srcDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+content := "[Container]\nImage=nginx:latest\n"
+if err := os.WriteFile(filepath.Join(srcDir, "app.container"), []byte(content), 0644); err != nil {
+t.Fatal(err)
+}
+// On-disk content matches desired – no drift
+if err := os.WriteFile(filepath.Join(quadletDir, "app.container"), []byte(content), 0644); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
+Sync:  config.SyncConfig{Prune: false},
+}
+engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
+
+plan := buildPlanFromDir(t, engine, srcDir, prevState)
+
+if len(plan.Add) != 0 || len(plan.Update) != 0 {
+t.Errorf("expected no-op plan when content matches disk; got add=%d update=%d", len(plan.Add), len(plan.Update))
+}
+}
+
+func TestBuildPlanDriftAware_DeleteSkippedWhenFileAbsent(t *testing.T) {
+tmpDir := t.TempDir()
+quadletDir := filepath.Join(tmpDir, "quadlets")
+srcDir := filepath.Join(tmpDir, "src")
+if err := os.MkdirAll(quadletDir, 0755); err != nil {
+t.Fatal(err)
+}
+if err := os.MkdirAll(srcDir, 0755); err != nil {
+t.Fatal(err)
+}
+
+cfg := &config.Config{
+Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
+Sync:  config.SyncConfig{Prune: true},
+}
+engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+
+// State tracks a file, but it is already gone from disk (manually deleted).
+prevState := &State{
+ManagedFiles: map[string]ManagedFile{
+filepath.Join(quadletDir, "gone.container"): {Hash: "xxx"},
+},
+}
+
+plan := buildPlanFromDir(t, engine, srcDir, prevState)
+
+// File was already deleted manually – drift-aware plan should skip the delete op.
+if len(plan.Delete) != 0 {
+t.Errorf("plan.Delete count = %d, want 0 (file already absent on disk)", len(plan.Delete))
+}
+}
+
+// capturingGitClient wraps a mockGitClient and records the ref argument.
+type capturingGitClient struct {
+inner   *mockGitClient
+usedRef *string
+}
+
+func (c *capturingGitClient) EnsureCheckout(ctx context.Context, url, ref, destDir string) (string, error) {
+*c.usedRef = ref
+return c.inner.EnsureCheckout(ctx, url, ref, destDir)
+}
+
+// trackingURLGitClient records the URL passed to EnsureCheckout.
+type trackingURLGitClient struct {
+urls *[]string
+}
+
+func (c *trackingURLGitClient) EnsureCheckout(_ context.Context, url, _, destDir string) (string, error) {
+*c.urls = append(*c.urls, url)
+if err := os.MkdirAll(destDir, 0755); err != nil {
+return "", err
+}
+return "sha", nil
+}

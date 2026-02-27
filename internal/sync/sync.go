@@ -47,14 +47,39 @@ type ConflictLoser struct {
 	SHA  string
 }
 
+// SpecOverride allows overriding the ref and/or commit for a specific repository URL.
+// Used by plan mode to checkout a specific ref/commit without affecting the live checkout.
+type SpecOverride struct {
+	// Ref overrides the configured ref for this repository.
+	Ref string
+	// Commit overrides both the ref and commit; takes precedence over Ref if set.
+	Commit string
+}
+
+// PlanEngineOptions configures plan-specific engine behaviour.
+type PlanEngineOptions struct {
+	// WorkDir, when non-empty, directs all repo checkouts to isolated subdirectories
+	// under WorkDir (format: {WorkDir}/repos/{repoID}/) instead of the live state dir.
+	// This prevents plan operations from disturbing the running live checkout.
+	WorkDir string
+	// SpecOverrides maps repo URL to a ref/commit override applied before checkout.
+	// If Commit is set it takes precedence over Ref.
+	SpecOverrides map[string]SpecOverride
+	// RepoFilter, when non-empty, restricts plan execution to repos whose URL matches.
+	RepoFilter string
+}
+
 // Engine orchestrates the sync process
 type Engine struct {
-	cfg        *config.Config
-	git        git.Client
-	gitFactory GitClientFactory
-	systemd    systemduser.Systemd
-	logger     *slog.Logger
-	dryRun     bool
+	cfg             *config.Config
+	git             git.Client
+	gitFactory      GitClientFactory
+	systemd         systemduser.Systemd
+	logger          *slog.Logger
+	dryRun          bool
+	workDirOverride string                   // isolated checkout root for plan mode
+	specOverrides   map[string]SpecOverride  // per-repo ref/commit overrides
+	repoFilter      string                   // if set, only plan this repo URL
 }
 
 // NewEngine creates a new sync engine using a single git client for all repos.
@@ -80,9 +105,38 @@ func NewEngineWithFactory(cfg *config.Config, factory GitClientFactory, systemd 
 	}
 }
 
+// NewEngineWithPlanOptions creates a dry-run engine with plan-specific options
+// (isolated workdir, per-repo ref/commit overrides, optional repo filter).
+func NewEngineWithPlanOptions(cfg *config.Config, factory GitClientFactory, systemd systemduser.Systemd, logger *slog.Logger, opts PlanEngineOptions) *Engine {
+	return &Engine{
+		cfg:             cfg,
+		gitFactory:      factory,
+		systemd:         systemd,
+		logger:          logger,
+		dryRun:          true,
+		workDirOverride: opts.WorkDir,
+		specOverrides:   opts.SpecOverrides,
+		repoFilter:      opts.RepoFilter,
+	}
+}
+
 // Run executes the complete sync process and returns structured results.
 func (e *Engine) Run(ctx context.Context) (*Result, error) {
 	repos := e.cfg.EffectiveRepositories()
+
+	// Apply repo filter: if set, restrict to the matching URL only.
+	if e.repoFilter != "" {
+		filtered := repos[:0]
+		for _, r := range repos {
+			if r.URL == e.repoFilter {
+				filtered = append(filtered, r)
+			}
+		}
+		repos = filtered
+		if len(repos) == 0 {
+			return nil, fmt.Errorf("no configured repository matches repo_url %q", e.repoFilter)
+		}
+	}
 
 	e.logger.Info("starting sync",
 		"repo_count", len(repos),
@@ -230,6 +284,17 @@ func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec)
 	states := make([]multirepo.RepoState, 0, len(repos))
 
 	for _, spec := range repos {
+		// Apply per-repo spec overrides (plan mode: ref/commit override).
+		if e.specOverrides != nil {
+			if override, ok := e.specOverrides[spec.URL]; ok {
+				if override.Commit != "" {
+					spec.Ref = override.Commit
+				} else if override.Ref != "" {
+					spec.Ref = override.Ref
+				}
+			}
+		}
+
 		var gitClient git.Client
 		if e.gitFactory != nil {
 			gitClient = e.gitFactory(e.cfg.AuthForSpec(spec))
@@ -237,8 +302,19 @@ func (e *Engine) loadAllRepoStates(ctx context.Context, repos []config.RepoSpec)
 			gitClient = e.git
 		}
 
-		repoDir := e.cfg.RepoDirForSpec(spec)
-		srcDir := e.cfg.QuadletSourceDirForSpec(spec)
+		// Use isolated workdir when set (plan mode), otherwise use live state dirs.
+		var repoDir, srcDir string
+		if e.workDirOverride != "" {
+			repoDir = filepath.Join(e.workDirOverride, "repos", config.RepoID(spec.URL))
+			if spec.Subdir != "" {
+				srcDir = filepath.Join(repoDir, spec.Subdir)
+			} else {
+				srcDir = repoDir
+			}
+		} else {
+			repoDir = e.cfg.RepoDirForSpec(spec)
+			srcDir = e.cfg.QuadletSourceDirForSpec(spec)
+		}
 
 		e.logger.Info("fetching repository", "repo", spec.URL, "ref", spec.Ref, "dest", repoDir)
 
@@ -275,7 +351,6 @@ func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.Effe
 			return nil, fmt.Errorf("failed to compute hash for %s: %w", item.AbsPath, err)
 		}
 
-		prev, exists := prevState.ManagedFiles[destPath]
 		op := FileOp{
 			SourcePath: item.AbsPath,
 			DestPath:   destPath,
@@ -284,10 +359,26 @@ func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.Effe
 			SourceRef:  item.SourceRef,
 			SourceSHA:  item.SourceSHA,
 		}
-		if !exists {
-			plan.Add = append(plan.Add, op)
-		} else if prev.Hash != hash {
-			plan.Update = append(plan.Update, op)
+
+		if e.dryRun {
+			// Drift-aware: compare desired content against actual on-disk content
+			// rather than the cached state hash.  This correctly shows "update" even
+			// when the file was manually modified (drifted) between syncs.
+			diskHash, diskErr := fileHash(destPath)
+			if diskErr != nil {
+				// File absent or unreadable on disk – treat as add.
+				plan.Add = append(plan.Add, op)
+			} else if diskHash != hash {
+				plan.Update = append(plan.Update, op)
+			}
+			// else: on-disk content already matches desired – no operation needed.
+		} else {
+			prev, exists := prevState.ManagedFiles[destPath]
+			if !exists {
+				plan.Add = append(plan.Add, op)
+			} else if prev.Hash != hash {
+				plan.Update = append(plan.Update, op)
+			}
 		}
 	}
 
@@ -295,6 +386,14 @@ func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.Effe
 	if e.cfg.Sync.Prune {
 		for destPath := range prevState.ManagedFiles {
 			if _, exists := desiredFiles[destPath]; !exists {
+				if e.dryRun {
+					// Drift-aware: only surface a delete op when the file still
+					// exists on disk.  If it was already removed manually, there
+					// is nothing to delete.
+					if _, statErr := os.Stat(destPath); os.IsNotExist(statErr) {
+						continue
+					}
+				}
 				plan.Delete = append(plan.Delete, FileOp{DestPath: destPath})
 			}
 		}

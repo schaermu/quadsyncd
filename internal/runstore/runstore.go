@@ -150,6 +150,12 @@ func generateRunID() (string, error) {
 	), nil
 }
 
+// WorkDirForRun returns the path to the isolated workdir for plan-mode repo checkouts.
+// The workdir lives inside the run directory so it is pruned automatically with the run.
+func (s *Store) WorkDirForRun(id string) string {
+	return filepath.Join(s.baseDir, id, "workdir")
+}
+
 // safeRunDir validates the run ID and returns the safe run directory path.
 // Rejects path traversal sequences, absolute paths, and empty IDs.
 func (s *Store) safeRunDir(id string) (string, error) {
