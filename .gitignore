@@ -48,3 +48,7 @@ Thumbs.db
 # Local state directories (for testing)
 .state/
 .local/
+
+# Web UI
+webui/node_modules/
+webui/.vscode/
