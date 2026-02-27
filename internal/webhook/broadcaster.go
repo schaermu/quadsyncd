@@ -140,9 +140,22 @@ func (b *Broadcaster) poll() {
 		}
 		return
 	}
+
+	// Track which runs currently exist on disk so we can prune stale state entries.
+	existingRuns := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
-			b.checkRun(entry.Name())
+			runID := entry.Name()
+			existingRuns[runID] = struct{}{}
+			b.checkRun(runID)
+		}
+	}
+
+	// Remove state for runs that no longer exist on disk. This prevents unbounded
+	// growth of b.states as old runs are pruned from the runstore.
+	for runID := range b.states {
+		if _, ok := existingRuns[runID]; !ok {
+			delete(b.states, runID)
 		}
 	}
 }
@@ -264,6 +277,11 @@ func readNewLogLines(path string, prevOffset int64) ([]map[string]interface{}, i
 		if err := json.Unmarshal(raw, &rec); err == nil {
 			lines = append(lines, rec)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		// Log the error but return whatever lines were read successfully.
+		// SSE delivery is best-effort; a partial read is preferable to no read.
+		slog.Error("broadcaster: failed to read log file", "path", path, "error", err)
 	}
 	return lines, newOffset
 }

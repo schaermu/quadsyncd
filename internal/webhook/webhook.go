@@ -142,11 +142,10 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 		Handler:           mux,
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
-		// WriteTimeout is intentionally 0 (no global deadline) to support
-		// long-lived SSE connections on GET /api/events.
-		// Per-request write deadlines are cleared individually via
-		// http.ResponseController inside handleEvents.
-		WriteTimeout:   0,
+		// WriteTimeout applies to all endpoints. Long-lived SSE connections on
+		// GET /api/events explicitly clear their write deadline per-connection
+		// via http.ResponseController inside handleEvents.
+		WriteTimeout:   30 * time.Second,
 		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
@@ -827,8 +826,8 @@ func (s *Server) handleTimer(w http.ResponseWriter, r *http.Request) {
 // It streams run lifecycle events (run_started, run_updated, log_appended, plan_ready)
 // in real-time by subscribing to the disk-backed Broadcaster.
 //
-// The write deadline is cleared per-connection so long-lived SSE connections are
-// not prematurely killed by the server-level WriteTimeout (which is set to 0).
+// The write deadline is cleared per-connection via http.ResponseController so the
+// 30s server-level WriteTimeout does not terminate long-lived SSE connections.
 // Keep-alive comments (": ping") are sent every 15 seconds to prevent proxy timeouts.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Set SSE headers before the first write commits the status code.

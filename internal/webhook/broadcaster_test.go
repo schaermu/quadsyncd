@@ -236,6 +236,65 @@ func TestBroadcaster_NoDuplicateRunStarted(t *testing.T) {
 	}
 }
 
+func TestBroadcaster_PrunedRunRemovedFromState(t *testing.T) {
+	b, runsDir := newTestBroadcaster(t)
+
+	runID := "20260101-120005-ffaabb"
+	meta := runstore.RunMeta{
+		ID:        runID,
+		Kind:      runstore.RunKindSync,
+		Status:    runstore.RunStatusRunning,
+		StartedAt: time.Now().UTC(),
+		Revisions: map[string]string{},
+		Conflicts: []runstore.ConflictSummary{},
+	}
+	writeTestMeta(t, runsDir, runID, meta)
+
+	ch := b.subscribe()
+	defer b.unsubscribe(ch)
+
+	b.poll()
+	<-ch // drain run_started
+
+	if _, ok := b.states[runID]; !ok {
+		t.Fatal("expected state entry for run after first poll")
+	}
+
+	// Remove the run directory (simulating runstore prune).
+	if err := os.RemoveAll(filepath.Join(runsDir, runID)); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	b.poll()
+
+	if _, ok := b.states[runID]; ok {
+		t.Error("expected stale state entry to be removed after run directory deleted")
+	}
+}
+
+func TestBroadcaster_RunContextCancellation(t *testing.T) {
+	b, _ := newTestBroadcaster(t)
+	// Use a very short interval so the ticker fires quickly.
+	b.interval = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.Run(ctx)
+	}()
+
+	// Cancel the context and verify the Run goroutine exits promptly.
+	cancel()
+	select {
+	case <-done:
+		// Run exited cleanly after context cancellation.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Broadcaster.Run did not exit after context cancellation")
+	}
+}
+
 // ---- SSE framing test ----
 
 func TestFormatSSEEvent(t *testing.T) {
@@ -369,17 +428,33 @@ func TestHandleEvents_ReceivesSSEEvent(t *testing.T) {
 		server.handleAPI(w, req)
 	}()
 
-	// Give the handler time to subscribe before broadcasting.
+	// Give the handler time to subscribe before triggering the event via disk.
 	time.Sleep(30 * time.Millisecond)
 
-	server.broadcaster.broadcast(sseEvent{
-		kind: sseEventRunStarted,
-		payload: SSEEventPayload{
-			RunID:  "sse-test-run-001",
-			Kind:   runstore.RunKindSync,
-			Status: runstore.RunStatusRunning,
-		},
-	})
+	// Write a real run to the broadcaster's runsDir and trigger poll(), rather than
+	// calling broadcast() directly. This avoids any implicit coupling to the internal
+	// channel and exercises the full disk-scan code path.
+	runID := "20260101-sse-receive-001"
+	runDir := filepath.Join(server.broadcaster.runsDir, runID)
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	meta := runstore.RunMeta{
+		ID:        runID,
+		Kind:      runstore.RunKindSync,
+		Status:    runstore.RunStatusRunning,
+		StartedAt: time.Now().UTC(),
+		Revisions: map[string]string{},
+		Conflicts: []runstore.ConflictSummary{},
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "meta.json"), data, 0644); err != nil {
+		t.Fatalf("write meta.json: %v", err)
+	}
+	server.broadcaster.poll()
 
 	// Give the handler time to write the event.
 	time.Sleep(30 * time.Millisecond)
@@ -393,7 +468,7 @@ func TestHandleEvents_ReceivesSSEEvent(t *testing.T) {
 	if !strings.Contains(body, "data: ") {
 		t.Errorf("expected data line in body, got: %q", body)
 	}
-	if !strings.Contains(body, "sse-test-run-001") {
+	if !strings.Contains(body, runID) {
 		t.Errorf("expected run_id in body, got: %q", body)
 	}
 }
