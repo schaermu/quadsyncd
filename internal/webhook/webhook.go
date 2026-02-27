@@ -404,9 +404,18 @@ type planAPIRequest struct {
 // writePlanWithArtifacts converts a sync.Plan to runstore.Plan, persists before/after
 // artifacts for quadlet-only files, and returns the populated Plan ready for storage.
 // Non-quadlet companion files are never read or stored.
+// PlanOp.Path is stored relative to quadletDir for API stability.
 func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID string, syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary, quadletDir string, requested runstore.PlanRequest, logger *slog.Logger) runstore.Plan {
 	ops := make([]runstore.PlanOp, 0, len(syncPlan.Add)+len(syncPlan.Update)+len(syncPlan.Delete))
 	idx := 0
+
+	relPath := func(abs string) string {
+		rel, err := filepath.Rel(quadletDir, abs)
+		if err != nil {
+			return abs // fallback: keep abs path rather than silently dropping
+		}
+		return filepath.ToSlash(rel)
+	}
 
 	writeArtifact := func(name string, path string) string {
 		content, err := os.ReadFile(path)
@@ -424,7 +433,7 @@ func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID st
 	for _, op := range syncPlan.Add {
 		pOp := runstore.PlanOp{
 			Op:         "add",
-			Path:       op.DestPath,
+			Path:       relPath(op.DestPath),
 			SourceRepo: op.SourceRepo,
 			SourceRef:  op.SourceRef,
 			SourceSHA:  op.SourceSHA,
@@ -442,7 +451,7 @@ func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID st
 	for _, op := range syncPlan.Update {
 		pOp := runstore.PlanOp{
 			Op:         "update",
-			Path:       op.DestPath,
+			Path:       relPath(op.DestPath),
 			SourceRepo: op.SourceRepo,
 			SourceRef:  op.SourceRef,
 			SourceSHA:  op.SourceSHA,
@@ -464,7 +473,7 @@ func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID st
 	for _, op := range syncPlan.Delete {
 		pOp := runstore.PlanOp{
 			Op:   "delete",
-			Path: op.DestPath,
+			Path: relPath(op.DestPath),
 		}
 		if quadlet.IsQuadletFile(op.DestPath) {
 			pOp.Unit = quadlet.UnitNameFromQuadlet(op.DestPath)
@@ -498,14 +507,31 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Parse optional JSON request body: { repo_url?, ref?, commit? }
 	var planReq planAPIRequest
-	if r.ContentLength != 0 {
-		dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
-		if err := dec.Decode(&planReq); err != nil {
+	dec := json.NewDecoder(io.LimitReader(r.Body, 64*1024))
+	if err := dec.Decode(&planReq); err != nil {
+		// Treat empty body as "no body" for this optional request payload.
+		if !errors.Is(err, io.EOF) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: " + err.Error()})
 			return
 		}
+	} else {
+		// Reject trailing tokens to catch malformed JSON like "{}foo".
+		if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid request body: unexpected trailing data"})
+			return
+		}
+	}
+
+	// Validate: ref/commit without repo_url is ambiguous – reject it.
+	if planReq.RepoURL == "" && (planReq.Ref != "" || planReq.Commit != "") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "repo_url is required when ref or commit is specified"})
+		return
 	}
 
 	// Create initial run metadata for plan
@@ -549,10 +575,18 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	logger := slog.New(teeHandler)
 
 	// Build plan engine options: isolated workdir + optional per-repo overrides.
+	workDir, err := s.store.WorkDirForRun(meta.ID)
+	if err != nil {
+		s.logger.Error("failed to resolve workdir for plan run", "run_id", meta.ID, "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to resolve plan workdir"})
+		return
+	}
 	planOpts := quadsyncd.PlanEngineOptions{
 		// Isolated checkout lives inside the run directory so it is automatically
 		// cleaned up when the run is pruned from the store.
-		WorkDir:    s.store.WorkDirForRun(meta.ID),
+		WorkDir:    workDir,
 		RepoFilter: planReq.RepoURL,
 	}
 	if planReq.RepoURL != "" && (planReq.Ref != "" || planReq.Commit != "") {

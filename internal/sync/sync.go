@@ -366,8 +366,12 @@ func (e *Engine) buildPlanFromEffective(prevState *State, items []multirepo.Effe
 			// when the file was manually modified (drifted) between syncs.
 			diskHash, diskErr := fileHash(destPath)
 			if diskErr != nil {
-				// File absent or unreadable on disk – treat as add.
-				plan.Add = append(plan.Add, op)
+				if os.IsNotExist(diskErr) {
+					// File absent on disk – treat as add.
+					plan.Add = append(plan.Add, op)
+				} else {
+					return nil, fmt.Errorf("failed to compute hash for on-disk file %s: %w", destPath, diskErr)
+				}
 			} else if diskHash != hash {
 				plan.Update = append(plan.Update, op)
 			}
