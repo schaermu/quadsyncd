@@ -1,0 +1,4 @@
+paths-ignore:
+  - internal/webui/dist/**
+  - webui/dist/**
+  - webui/node_modules/**
