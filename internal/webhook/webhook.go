@@ -49,15 +49,15 @@ type Server struct {
 	cfg           *config.Config
 	runnerFactory quadsyncd.RunnerFactory
 	systemd       systemduser.Systemd
-	logger      *slog.Logger
-	store       runstore.ReadWriter
-	broadcaster *Broadcaster
-	secret      []byte
-	syncMu      sync.Mutex // guards syncRunning and syncPending
-	syncRunning bool       // whether a sync is currently in progress
-	syncPending bool       // whether another sync is needed after the current one
-	debounce    *debouncer
-	uiHandler   http.Handler // serves embedded SPA assets
+	logger        *slog.Logger
+	store         runstore.ReadWriter
+	broadcaster   *Broadcaster
+	secret        []byte
+	syncMu        sync.Mutex // guards syncRunning and syncPending
+	syncRunning   bool       // whether a sync is currently in progress
+	syncPending   bool       // whether another sync is needed after the current one
+	debounce      *debouncer
+	uiHandler     http.Handler // serves embedded SPA assets
 }
 
 // debouncer implements debouncing for webhook events
