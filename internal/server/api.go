@@ -27,11 +27,8 @@ type OverviewResponse = dto.OverviewResponse
 // RunsListResponse is an alias for the DTO type, kept for backward compatibility.
 type RunsListResponse = dto.RunsListResponse
 
-// RunLogsResponse is the response shape for GET /api/runs/{id}/logs.
-type RunLogsResponse struct {
-	Items      []map[string]interface{} `json:"items"`
-	NextCursor string                   `json:"next_cursor,omitempty"`
-}
+// RunLogsResponse is an alias for the DTO type, kept for backward compatibility.
+type RunLogsResponse = dto.LogsResponse
 
 // UnitInfo describes a single managed quadlet unit.
 type UnitInfo struct {
