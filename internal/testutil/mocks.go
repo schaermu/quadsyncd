@@ -2,7 +2,9 @@ package testutil
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -130,8 +132,11 @@ func (m *MockRunStore) Create(ctx context.Context, meta *runstore.RunMeta) error
 	if meta.ID == "" {
 		meta.ID = fmt.Sprintf("run-%d", len(m.Runs)+1)
 	}
-	cp := *meta
-	m.Runs[meta.ID] = &cp
+	cp, err := deepCopyJSON(meta)
+	if err != nil {
+		return fmt.Errorf("MockRunStore.Create: %w", err)
+	}
+	m.Runs[meta.ID] = cp
 	return nil
 }
 
@@ -144,8 +149,11 @@ func (m *MockRunStore) Update(ctx context.Context, meta *runstore.RunMeta) error
 	if _, ok := m.Runs[meta.ID]; !ok {
 		return fmt.Errorf("%w: %s", runstore.ErrRunNotFound, meta.ID)
 	}
-	cp := *meta
-	m.Runs[meta.ID] = &cp
+	cp, err := deepCopyJSON(meta)
+	if err != nil {
+		return fmt.Errorf("MockRunStore.Update: %w", err)
+	}
+	m.Runs[meta.ID] = cp
 	return nil
 }
 
@@ -159,8 +167,11 @@ func (m *MockRunStore) Get(ctx context.Context, id string) (*runstore.RunMeta, e
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", runstore.ErrRunNotFound, id)
 	}
-	cp := *r
-	return &cp, nil
+	cp, err := deepCopyJSON(r)
+	if err != nil {
+		return nil, fmt.Errorf("MockRunStore.Get: %w", err)
+	}
+	return cp, nil
 }
 
 func (m *MockRunStore) List(ctx context.Context) ([]runstore.RunMeta, error) {
@@ -171,8 +182,16 @@ func (m *MockRunStore) List(ctx context.Context) ([]runstore.RunMeta, error) {
 	defer m.mu.Unlock()
 	out := make([]runstore.RunMeta, 0, len(m.Runs))
 	for _, r := range m.Runs {
-		out = append(out, *r)
+		cp, err := deepCopyJSON(r)
+		if err != nil {
+			return nil, fmt.Errorf("MockRunStore.List: %w", err)
+		}
+		out = append(out, *cp)
 	}
+	// Match real Store.List sort order: newest first.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].StartedAt.After(out[j].StartedAt)
+	})
 	return out, nil
 }
 
@@ -194,7 +213,20 @@ func (m *MockRunStore) ReadLog(ctx context.Context, id string) ([]map[string]int
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return []map[string]interface{}{}, nil
+	lines := m.Logs[id]
+	records := make([]map[string]interface{}, 0, len(lines))
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		var record map[string]interface{}
+		if err := json.Unmarshal(line, &record); err != nil {
+			// Skip invalid JSON lines, matching real Store.ReadLog behaviour.
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 func (m *MockRunStore) WritePlan(ctx context.Context, id string, plan runstore.Plan) error {
@@ -203,8 +235,11 @@ func (m *MockRunStore) WritePlan(ctx context.Context, id string, plan runstore.P
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := plan
-	m.Plans[id] = &cp
+	cp, err := deepCopyJSON(&plan)
+	if err != nil {
+		return fmt.Errorf("MockRunStore.WritePlan: %w", err)
+	}
+	m.Plans[id] = cp
 	return nil
 }
 
@@ -218,8 +253,11 @@ func (m *MockRunStore) ReadPlan(ctx context.Context, id string) (*runstore.Plan,
 	if !ok {
 		return nil, fmt.Errorf("%w for run: %s", runstore.ErrPlanNotFound, id)
 	}
-	cp := *p
-	return &cp, nil
+	cp, err := deepCopyJSON(p)
+	if err != nil {
+		return nil, fmt.Errorf("MockRunStore.ReadPlan: %w", err)
+	}
+	return cp, nil
 }
 
 func (m *MockRunStore) WriteArtifact(ctx context.Context, id, name string, content []byte) error {
@@ -265,4 +303,18 @@ func (m *MockRunStore) Prune(ctx context.Context, maxAge time.Duration) error {
 		return m.PruneFunc(ctx, maxAge)
 	}
 	return nil
+}
+
+// deepCopyJSON performs a deep copy of v via JSON marshal/unmarshal, matching
+// the effective isolation provided by the real filesystem-backed Store.
+func deepCopyJSON[T any](v *T) (*T, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("deep copy marshal: %w", err)
+	}
+	var out T
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("deep copy unmarshal: %w", err)
+	}
+	return &out, nil
 }

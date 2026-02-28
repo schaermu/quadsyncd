@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,10 @@ func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemdu
 	// Validate required parameters
 	if store == nil {
 		return nil, fmt.Errorf("runstore.ReadWriter cannot be nil")
+	}
+	// Reject typed-nil pointers wrapped in the interface (e.g. (*runstore.Store)(nil)).
+	if v := reflect.ValueOf(store); v.Kind() == reflect.Ptr && v.IsNil() {
+		return nil, fmt.Errorf("runstore.ReadWriter is a nil pointer wrapped in an interface")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
