@@ -74,7 +74,14 @@ func (p *PlanService) Execute(ctx context.Context, req runstore.PlanRequest) (st
 	workDir, err := p.store.WorkDirForRun(meta.ID)
 	if err != nil {
 		p.logger.Error("failed to resolve workdir for plan run", "run_id", meta.ID, "error", err)
-		return "", fmt.Errorf("failed to resolve plan workdir: %w", err)
+		endedAt := time.Now().UTC()
+		meta.EndedAt = &endedAt
+		meta.Status = runstore.RunStatusError
+		meta.Error = fmt.Sprintf("failed to resolve plan workdir: %v", err)
+		if updateErr := p.store.Update(ctx, meta); updateErr != nil {
+			p.logger.Error("failed to persist plan run error state after workdir failure", "run_id", meta.ID, "error", updateErr)
+		}
+		return meta.ID, fmt.Errorf("failed to resolve plan workdir: %w", err)
 	}
 
 	planOpts := quadsyncd.PlanEngineOptions{

@@ -69,7 +69,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Check content type
 	contentType := r.Header.Get("Content-Type")
-	if contentType != "application/json" {
+	if !strings.HasPrefix(contentType, "application/json") {
 		s.logger.Warn("rejecting request with invalid content type", "content_type", contentType)
 		http.Error(w, "Invalid content type", http.StatusBadRequest)
 		return
