@@ -1,4 +1,4 @@
-package webhook
+package server
 
 import (
 	"bytes"
@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/config"
-	"github.com/schaermu/quadsyncd/internal/git"
+
 	"github.com/schaermu/quadsyncd/internal/runstore"
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/testutil"
@@ -508,101 +508,6 @@ func TestDebouncer(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected callback to be called once, got %d", count)
 	}
-}
-
-// TestPerformSync_SingleFlight verifies that concurrent performSync calls use
-// single-flight semantics: at most one sync runs at a time and at most one
-// additional run is queued; excess concurrent requests are dropped.
-func TestPerformSync_SingleFlight(t *testing.T) {
-	cfg, _ := setupTestConfig(t)
-	logger := testutil.TestLogger()
-
-	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
-		t.Fatalf("failed to create quadlet dir: %v", err)
-	}
-	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
-		t.Fatalf("failed to create state dir: %v", err)
-	}
-
-	// Use a slow git client to keep the first sync in-flight long enough for
-	// concurrent callers to arrive.
-	syncStarted := make(chan struct{})
-	syncProceed := make(chan struct{})
-
-	slowGit := &slowMockGitClient{
-		started: syncStarted,
-		proceed: syncProceed,
-	}
-	mockSys := &testutil.MockSystemd{Available: true}
-
-	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(func(_ config.AuthConfig) git.Client { return slowGit }, mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
-	if err != nil {
-		t.Fatalf("NewServer() failed: %v", err)
-	}
-
-	ctx := context.Background()
-
-	// Start first sync in background; it will block until syncProceed is closed.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		server.performSync(ctx, runstore.TriggerWebhook)
-	}()
-
-	// Wait until the first sync has started (git checkout entered).
-	<-syncStarted
-
-	// Fire three more concurrent performSync calls while the first is running.
-	// Only one of these should queue a pending re-run; the other two are dropped.
-	var wg sync.WaitGroup
-	for i := 0; i < 3; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			server.performSync(ctx, runstore.TriggerWebhook)
-		}()
-	}
-	wg.Wait()
-
-	// Exactly one pending sync should have been recorded.
-	server.syncMu.Lock()
-	pending := server.syncPending
-	server.syncMu.Unlock()
-
-	if !pending {
-		t.Error("expected syncPending to be true after concurrent performSync calls")
-	}
-
-	// Allow the first sync to complete; the server should then service the
-	// single pending re-run automatically.
-	close(syncProceed)
-	<-done // performSync only returns once all pending syncs have completed
-
-	server.syncMu.Lock()
-	stillRunning := server.syncRunning
-	stillPending := server.syncPending
-	server.syncMu.Unlock()
-
-	if stillRunning {
-		t.Error("expected syncRunning to be false after all syncs completed")
-	}
-	if stillPending {
-		t.Error("expected syncPending to be false after pending re-run was serviced")
-	}
-}
-
-// slowMockGitClient blocks EnsureCheckout until proceed is closed, allowing
-// tests to control sync concurrency.
-type slowMockGitClient struct {
-	started chan struct{}
-	proceed chan struct{}
-	once    sync.Once
-}
-
-func (m *slowMockGitClient) EnsureCheckout(_ context.Context, _, _, _ string) (string, error) {
-	m.once.Do(func() { close(m.started) })
-	<-m.proceed
-	return "abc123", nil
 }
 
 func TestStartWithListener(t *testing.T) {

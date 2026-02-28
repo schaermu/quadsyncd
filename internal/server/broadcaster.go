@@ -5,7 +5,7 @@
 // Each poll cycle compares on-disk state against last-known state and emits the
 // minimal set of events needed to bring clients up to date.
 // Delivery semantics: at-least-once, best-effort (duplicates acceptable).
-package webhook
+package server
 
 import (
 	"bufio"
