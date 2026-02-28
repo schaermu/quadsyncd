@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ type Server struct {
 	gitFactory  GitClientFactory
 	systemd     systemduser.Systemd
 	logger      *slog.Logger
-	store       *runstore.Store
+	store       runstore.ReadWriter
 	broadcaster *Broadcaster
 	secret      []byte
 	syncMu      sync.Mutex // guards syncRunning and syncPending
@@ -72,10 +73,14 @@ type debouncer struct {
 }
 
 // NewServer creates a new webhook server
-func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, store *runstore.Store, logger *slog.Logger) (*Server, error) {
+func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, store runstore.ReadWriter, logger *slog.Logger) (*Server, error) {
 	// Validate required parameters
 	if store == nil {
-		return nil, fmt.Errorf("runstore.Store cannot be nil")
+		return nil, fmt.Errorf("runstore.ReadWriter cannot be nil")
+	}
+	// Reject typed-nil pointers wrapped in the interface (e.g. (*runstore.Store)(nil)).
+	if v := reflect.ValueOf(store); v.Kind() == reflect.Ptr && v.IsNil() {
+		return nil, fmt.Errorf("runstore.ReadWriter is a nil pointer wrapped in an interface")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
@@ -414,7 +419,7 @@ type planAPIRequest struct {
 // artifacts for quadlet-only files, and returns the populated Plan ready for storage.
 // Non-quadlet companion files are never read or stored.
 // PlanOp.Path is stored relative to quadletDir for API stability.
-func writePlanWithArtifacts(ctx context.Context, store *runstore.Store, runID string, syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary, quadletDir string, requested runstore.PlanRequest, logger *slog.Logger) runstore.Plan {
+func writePlanWithArtifacts(ctx context.Context, store runstore.ReadWriter, runID string, syncPlan *quadsyncd.Plan, conflicts []runstore.ConflictSummary, quadletDir string, requested runstore.PlanRequest, logger *slog.Logger) runstore.Plan {
 	ops := make([]runstore.PlanOp, 0, len(syncPlan.Add)+len(syncPlan.Update)+len(syncPlan.Delete))
 	idx := 0
 
