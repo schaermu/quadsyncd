@@ -113,7 +113,7 @@ func normalizeMergeKey(rel string) (string, error) {
 	}
 	// Reject Windows drive prefixes (defensive)
 	if len(rel) >= 2 && rel[1] == ':' {
-		return "", fmt.Errorf("Windows-style drive prefix not allowed")
+		return "", fmt.Errorf("windows-style drive prefix not allowed")
 	}
 	cleaned := filepath.ToSlash(filepath.Clean(rel))
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {

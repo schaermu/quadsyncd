@@ -14,7 +14,7 @@ test:
 
 lint:
 	@echo "==> Running linter..."
-	@go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
+	@golangci-lint run
 
 vuln:
 	@echo "==> Checking for vulnerabilities..."
