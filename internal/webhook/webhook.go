@@ -84,6 +84,9 @@ func NewServer(cfg *config.Config, runnerFactory quadsyncd.RunnerFactory, system
 	if systemd == nil {
 		return nil, fmt.Errorf("systemd client cannot be nil")
 	}
+	if runnerFactory == nil {
+		return nil, fmt.Errorf("runner factory cannot be nil")
+	}
 
 	// Load webhook secret from file
 	secret, err := os.ReadFile(cfg.Serve.GitHubWebhookSecretFile)

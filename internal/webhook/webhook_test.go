@@ -1278,7 +1278,8 @@ func setupServerWithRuns(t *testing.T, runs []runstore.RunMeta) (*Server, *runst
 		}
 	}
 
-	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), &testutil.MockSystemd{Available: true}), &testutil.MockSystemd{Available: true}, store, logger)
+	mockSystemd := &testutil.MockSystemd{Available: true}
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -1879,7 +1880,8 @@ func TestHandleUnits(t *testing.T) {
 
 		logger := testutil.TestLogger()
 		store := runstore.NewStore(cfg.Paths.StateDir, logger)
-		srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), &testutil.MockSystemd{Available: true}), &testutil.MockSystemd{Available: true}, store, logger)
+		mockSystemd := &testutil.MockSystemd{Available: true}
+		srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
 		}
