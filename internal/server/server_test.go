@@ -549,6 +549,44 @@ func TestStartWithListener(t *testing.T) {
 	}
 }
 
+func TestStartWithListener_SkipInitialSync(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := testutil.TestLogger()
+
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &testutil.MockGitClient{}
+	mockSys := &testutil.MockSystemd{Available: true}
+
+	srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+	srv.SetSkipInitialSync(true)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer func() {
+		_ = listener.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = srv.StartWithListener(ctx, listener)
+
+	if mockGit.Called {
+		t.Error("expected initial sync to be skipped, but git was called")
+	}
+}
+
 func TestSliceContains(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -125,6 +125,12 @@ Sync-specific flags:
 |------|---------|-------------|
 | `--dry-run` | `false` | Show what would be done without making changes. |
 
+Serve-specific flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--skip-initial-sync` | `false` | Skip the initial sync on startup. Useful for local development and testing the Web UI without a fully configured repository. |
+
 ## Validation
 
 Configuration is validated on load. The following rules are enforced:

@@ -23,17 +23,18 @@ import (
 
 // Server implements the webhook HTTP server and Web UI.
 type Server struct {
-	cfg           *config.Config
-	runnerFactory quadsyncd.RunnerFactory
-	systemd       systemduser.Systemd
-	logger        *slog.Logger
-	store         runstore.ReadWriter
-	broadcaster   *Broadcaster
-	secret        []byte
-	syncSvc       *service.SyncService
-	planSvc       *service.PlanService
-	debounce      *debouncer
-	uiHandler     http.Handler // serves embedded SPA assets
+	cfg             *config.Config
+	runnerFactory   quadsyncd.RunnerFactory
+	systemd         systemduser.Systemd
+	logger          *slog.Logger
+	store           runstore.ReadWriter
+	broadcaster     *Broadcaster
+	secret          []byte
+	syncSvc         *service.SyncService
+	planSvc         *service.PlanService
+	debounce        *debouncer
+	uiHandler       http.Handler // serves embedded SPA assets
+	skipInitialSync bool
 }
 
 // NewServer creates a new webhook/API server.
@@ -92,6 +93,11 @@ func NewServer(cfg *config.Config, runnerFactory quadsyncd.RunnerFactory, system
 	return s, nil
 }
 
+// SetSkipInitialSync controls whether the server skips the initial sync on startup.
+func (s *Server) SetSkipInitialSync(skip bool) {
+	s.skipInitialSync = skip
+}
+
 // Start binds to the configured address and starts the HTTP server.
 func (s *Server) Start(ctx context.Context) error {
 	listener, err := net.Listen("tcp", s.cfg.Serve.ListenAddr)
@@ -103,10 +109,15 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 // StartWithListener starts the HTTP server using a provided listener (supports
-// systemd socket activation). It performs an initial sync before accepting traffic.
+// systemd socket activation). It performs an initial sync before accepting traffic
+// unless SetSkipInitialSync(true) has been called.
 func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) error {
-	s.logger.Info("performing initial sync before starting webhook server")
-	s.syncSvc.TriggerSync(ctx, runstore.TriggerStartup)
+	if s.skipInitialSync {
+		s.logger.Info("skipping initial sync (--skip-initial-sync flag set)")
+	} else {
+		s.logger.Info("performing initial sync before starting webhook server")
+		s.syncSvc.TriggerSync(ctx, runstore.TriggerStartup)
+	}
 
 	// Start the SSE broadcaster in the background.
 	go s.broadcaster.Run(ctx)

@@ -49,9 +49,9 @@ See the [Installation](https://github.com/schaermu/quadsyncd/wiki/Installation) 
 ## Commands
 
 ```bash
-quadsyncd sync [--dry-run] [--config path]   # One-time sync
-quadsyncd serve [--config path]              # Start webhook server
-quadsyncd version                            # Show version
+quadsyncd sync [--dry-run] [--config path]                  # One-time sync
+quadsyncd serve [--skip-initial-sync] [--config path]       # Start webhook server
+quadsyncd version                                           # Show version
 ```
 
 ## Documentation
