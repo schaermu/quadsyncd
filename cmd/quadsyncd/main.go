@@ -15,9 +15,9 @@ import (
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/logging"
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	"github.com/schaermu/quadsyncd/internal/server"
 	"github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
-	"github.com/schaermu/quadsyncd/internal/server"
 	"github.com/spf13/cobra"
 )
 
