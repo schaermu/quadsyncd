@@ -1,7 +1,7 @@
 # quadsyncd
 
 [![CI](https://img.shields.io/github/actions/workflow/status/schaermu/quadsyncd/ci.yml?branch=main&label=ci)](https://github.com/schaermu/quadsyncd/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/schaermu/quadsyncd/badges/.github/badges/coverage.json)](https://github.com/schaermu/quadsyncd/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/schaermu/c21e340605fb787e3d2e2322296bc756/raw/coverage.json)](https://github.com/schaermu/quadsyncd/actions/workflows/ci.yml)
 [![E2E Discovery](https://img.shields.io/github/actions/workflow/status/schaermu/quadsyncd/e2e-discovery.yml?branch=main&label=e2e-discovery)](https://github.com/schaermu/quadsyncd/actions/workflows/e2e-discovery.yml)
 
 Automatically synchronize Podman Quadlet files from a Git repository to rootless Podman-enabled servers.
