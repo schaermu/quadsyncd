@@ -6,6 +6,7 @@
   import RunDetail from "./pages/RunDetail.svelte";
   import PlanView from "./pages/PlanView.svelte";
   import Units from "./pages/Units.svelte";
+  import NotFound from "./pages/NotFound.svelte";
 
   const routes = {
     "/": Dashboard,
@@ -13,6 +14,7 @@
     "/runs/:id": RunDetail,
     "/plan": PlanView,
     "/units": Units,
+    "*": NotFound,
   };
 </script>
 

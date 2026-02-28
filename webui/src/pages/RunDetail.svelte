@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import {
     fetchRunDetail,
     fetchRunLogs,
@@ -23,6 +23,8 @@
 
   let { params }: { params: { id: string } } = $props();
 
+  const MAX_LOG_ENTRIES = 5000;
+
   let loading = $state(true);
   let error = $state<string | null>(null);
   let run = $state<RunMeta | null>(null);
@@ -33,8 +35,11 @@
   let levelFilter = $state("");
   let searchFilter = $state("");
   let cleanup: (() => void) | undefined;
+  let abortController: AbortController | undefined;
 
   async function load() {
+    abortController?.abort();
+    abortController = new AbortController();
     loading = true;
     error = null;
     try {
@@ -48,6 +53,7 @@
         logsResp.status === "fulfilled" ? logsResp.value.items : [];
       plan = planResp.status === "fulfilled" ? planResp.value : null;
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       error = e instanceof Error ? e.message : "Failed to load run";
     } finally {
       loading = false;
@@ -67,21 +73,31 @@
     });
   });
 
-  onMount(() => {
+  $effect(() => {
+    const _id = params.id;
     load();
+
+    cleanup?.();
     cleanup = onSSEEvent((kind, payload) => {
-      if (payload.run_id !== params.id) return;
+      if (payload.run_id !== _id) return;
       if (kind === "run_updated") {
         load();
       } else if (kind === "log_appended" && payload.lines) {
-        logs = [...logs, ...(payload.lines as LogEntry[])];
+        const newLogs = [...logs, ...(payload.lines as LogEntry[])];
+        logs =
+          newLogs.length > MAX_LOG_ENTRIES
+            ? newLogs.slice(newLogs.length - MAX_LOG_ENTRIES)
+            : newLogs;
       } else if (kind === "plan_ready") {
-        fetchRunPlan(params.id).then((p) => (plan = p)).catch(() => {});
+        fetchRunPlan(_id)
+          .then((p) => (plan = p))
+          .catch(() => {});
       }
     });
   });
 
   onDestroy(() => {
+    abortController?.abort();
     cleanup?.();
   });
 </script>

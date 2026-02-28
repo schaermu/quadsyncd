@@ -1,5 +1,7 @@
 /** SSE client for quadsyncd live events. */
 
+import type { ConflictSummary, LogEntry } from "./api";
+
 export type SSEEventKind =
   | "run_started"
   | "run_updated"
@@ -15,14 +17,15 @@ export interface SSEEventPayload {
   started_at?: string;
   ended_at?: string;
   revisions?: Record<string, string>;
-  conflicts?: unknown[];
-  lines?: Record<string, unknown>[];
+  conflicts?: ConflictSummary[];
+  lines?: LogEntry[];
 }
 
 export type SSECallback = (kind: SSEEventKind, payload: SSEEventPayload) => void;
 
 let eventSource: EventSource | null = null;
 let listeners: SSECallback[] = [];
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let connectionState: "connected" | "connecting" | "disconnected" =
   "disconnected";
 let stateListeners: Array<
@@ -65,7 +68,7 @@ export function connectSSE() {
     es.close();
     eventSource = null;
     // Reconnect after 3 seconds
-    setTimeout(connectSSE, 3000);
+    reconnectTimer = setTimeout(connectSSE, 3000);
   };
 
   const eventKinds: SSEEventKind[] = [
@@ -87,6 +90,10 @@ export function connectSSE() {
 }
 
 export function disconnectSSE() {
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   if (eventSource) {
     eventSource.close();
     eventSource = null;
