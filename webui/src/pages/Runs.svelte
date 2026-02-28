@@ -87,12 +87,12 @@
       <table class="table table-sm">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>Kind</th>
-            <th>Status</th>
-            <th>Trigger</th>
-            <th>Started</th>
-            <th>Ended</th>
+            <th scope="col">ID</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Status</th>
+            <th scope="col">Trigger</th>
+            <th scope="col">Started</th>
+            <th scope="col">Ended</th>
           </tr>
         </thead>
         <tbody>

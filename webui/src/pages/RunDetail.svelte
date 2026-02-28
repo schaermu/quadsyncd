@@ -19,6 +19,8 @@
   import LoadingState from "../components/LoadingState.svelte";
   import ErrorState from "../components/ErrorState.svelte";
   import EmptyState from "../components/EmptyState.svelte";
+  import ConflictAlert from "../components/ConflictAlert.svelte";
+  import PlanOpsTable from "../components/PlanOpsTable.svelte";
   import { link } from "svelte-spa-router";
 
   let { params }: { params: { id: string } } = $props();
@@ -118,21 +120,27 @@
     <!-- Tab navigation -->
     <div role="tablist" class="tabs tabs-bordered">
       <button
+        id="tab-logs"
         role="tab"
+        aria-selected={activeTab === "logs"}
         class="tab {activeTab === 'logs' ? 'tab-active' : ''}"
         onclick={() => (activeTab = "logs")}
       >
         Logs ({filteredLogs.length})
       </button>
       <button
+        id="tab-plan"
         role="tab"
+        aria-selected={activeTab === "plan"}
         class="tab {activeTab === 'plan' ? 'tab-active' : ''}"
         onclick={() => (activeTab = "plan")}
       >
         Plan {plan ? `(${plan.ops.length})` : ""}
       </button>
       <button
+        id="tab-meta"
         role="tab"
+        aria-selected={activeTab === "meta"}
         class="tab {activeTab === 'meta' ? 'tab-active' : ''}"
         onclick={() => (activeTab = "meta")}
       >
@@ -142,6 +150,7 @@
 
     <!-- Logs Tab -->
     {#if activeTab === "logs"}
+      <div role="tabpanel" aria-labelledby="tab-logs">
       <div class="space-y-2">
         <!-- Filter bar -->
         <div class="flex flex-wrap gap-2 items-center">
@@ -192,10 +201,12 @@
           </div>
         {/if}
       </div>
+      </div>
     {/if}
 
     <!-- Plan Tab -->
     {#if activeTab === "plan"}
+      <div role="tabpanel" aria-labelledby="tab-plan">
       {#if !plan}
         <EmptyState message="No plan data available for this run." />
       {:else if plan.ops.length === 0}
@@ -204,60 +215,16 @@
         </div>
       {:else}
         <div class="space-y-3">
-          {#if plan.conflicts.length > 0}
-            <div class="alert alert-warning">
-              <span
-                >{plan.conflicts.length} conflict{plan.conflicts.length > 1
-                  ? "s"
-                  : ""} detected</span
-              >
-            </div>
-          {/if}
-
-          <div class="overflow-x-auto">
-            <table class="table table-sm">
-              <thead>
-                <tr>
-                  <th>Op</th>
-                  <th>Path</th>
-                  <th>Source</th>
-                  <th>Ref</th>
-                  <th>SHA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each plan.ops as op}
-                  <tr>
-                    <td>
-                      <span
-                        class="badge badge-sm {op.op === 'add'
-                          ? 'badge-success'
-                          : op.op === 'delete'
-                            ? 'badge-error'
-                            : 'badge-warning'}"
-                      >
-                        {op.op}
-                      </span>
-                    </td>
-                    <td class="font-mono text-xs">{op.path}</td>
-                    <td class="text-xs max-w-[200px] truncate">
-                      {op.source_repo ?? "—"}
-                    </td>
-                    <td class="font-mono text-xs">{op.source_ref ?? "—"}</td>
-                    <td class="font-mono text-xs">
-                      {shortSha(op.source_sha)}
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
+          <ConflictAlert count={plan.conflicts.length} />
+          <PlanOpsTable ops={plan.ops} layout="table" />
         </div>
       {/if}
+      </div>
     {/if}
 
     <!-- Meta/Details Tab -->
     {#if activeTab === "meta"}
+      <div role="tabpanel" aria-labelledby="tab-meta">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="card bg-base-200 shadow-sm">
           <div class="card-body p-4 space-y-2">
@@ -309,9 +276,9 @@
                 <table class="table table-xs">
                   <thead>
                     <tr>
-                      <th>Merge Key</th>
-                      <th>Winner</th>
-                      <th>Losers</th>
+                      <th scope="col">Merge Key</th>
+                      <th scope="col">Winner</th>
+                      <th scope="col">Losers</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -337,6 +304,7 @@
             </div>
           </div>
         {/if}
+      </div>
       </div>
     {/if}
   {/if}

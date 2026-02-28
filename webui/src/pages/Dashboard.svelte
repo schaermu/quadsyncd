@@ -138,9 +138,9 @@
             <table class="table table-sm">
               <thead>
                 <tr>
-                  <th>URL</th>
-                  <th>Ref</th>
-                  <th>Current SHA</th>
+                  <th scope="col">URL</th>
+                  <th scope="col">Ref</th>
+                  <th scope="col">Current SHA</th>
                 </tr>
               </thead>
               <tbody>
@@ -172,11 +172,11 @@
             <table class="table table-sm">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Kind</th>
-                  <th>Status</th>
-                  <th>Trigger</th>
-                  <th>Started</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Trigger</th>
+                  <th scope="col">Started</th>
                 </tr>
               </thead>
               <tbody>

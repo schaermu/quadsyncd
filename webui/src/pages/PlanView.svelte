@@ -8,11 +8,12 @@
     type Plan,
   } from "../lib/api";
   import { onSSEEvent } from "../lib/sse";
-  import { shortSha } from "../lib/format";
   import StatusBadge from "../components/StatusBadge.svelte";
   import LoadingState from "../components/LoadingState.svelte";
   import ErrorState from "../components/ErrorState.svelte";
   import EmptyState from "../components/EmptyState.svelte";
+  import ConflictAlert from "../components/ConflictAlert.svelte";
+  import PlanOpsTable from "../components/PlanOpsTable.svelte";
   import { push } from "svelte-spa-router";
 
   let triggering = $state(false);
@@ -135,49 +136,8 @@
             <span>No changes detected – everything is in sync.</span>
           </div>
         {:else}
-          {#if plan.conflicts.length > 0}
-            <div class="alert alert-warning">
-              <span
-                >{plan.conflicts.length} conflict{plan.conflicts.length > 1
-                  ? "s"
-                  : ""} detected</span
-              >
-            </div>
-          {/if}
-
-          <div class="space-y-4">
-            <div class="text-sm text-base-content/60">
-              {plan.ops.length} operation{plan.ops.length > 1 ? "s" : ""}
-              planned
-            </div>
-
-            {#each plan.ops as op}
-              <div class="card bg-base-300 shadow-sm">
-                <div class="card-body p-3 space-y-1">
-                  <div class="flex items-center gap-2">
-                    <span
-                      class="badge badge-sm {op.op === 'add'
-                        ? 'badge-success'
-                        : op.op === 'delete'
-                          ? 'badge-error'
-                          : 'badge-warning'}"
-                    >
-                      {op.op}
-                    </span>
-                    <span class="font-mono text-sm font-medium">{op.path}</span>
-                  </div>
-                  {#if op.source_repo}
-                    <div class="text-xs text-base-content/50">
-                      {op.source_repo}
-                      {#if op.source_ref}@ {op.source_ref}{/if}
-                      {#if op.source_sha}
-                        ({shortSha(op.source_sha)}){/if}
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
+          <ConflictAlert count={plan.conflicts.length} />
+          <PlanOpsTable ops={plan.ops} layout="cards" />
         {/if}
       {:else}
         <EmptyState message="No plan data available." />
