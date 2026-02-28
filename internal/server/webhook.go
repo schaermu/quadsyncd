@@ -59,6 +59,9 @@ func (d *debouncer) trigger(callback func()) {
 }
 
 // handleWebhook handles incoming GitHub webhook requests.
+// Webhook error responses use http.Error (plain text) intentionally.
+// GitHub does not parse JSON error bodies from webhook endpoints,
+// and plain text is simpler to debug in webhook delivery logs.
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	// Only accept POST requests
 	if r.Method != http.MethodPost {

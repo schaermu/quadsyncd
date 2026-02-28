@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	"github.com/schaermu/quadsyncd/internal/server/dto"
 )
 
 // writeJSON encodes v as JSON and writes it with the given status code.
@@ -19,7 +20,7 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 // writeJSONError writes a JSON error response.
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeJSON(w, status, dto.ErrorResponse{Error: msg})
 }
 
 // encodeCursor encodes an integer offset as an opaque cursor string.

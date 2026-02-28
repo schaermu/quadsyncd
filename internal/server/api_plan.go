@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	"github.com/schaermu/quadsyncd/internal/server/dto"
 )
 
 // planAPIRequest is the optional JSON body accepted by POST /api/plan.
@@ -56,16 +57,15 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 
 	runID, err := s.planSvc.Execute(ctx, req)
 	if err != nil {
-		resp := map[string]interface{}{
-			"error":  err.Error(),
-			"run_id": runID,
-		}
-		writeJSON(w, http.StatusInternalServerError, resp)
+		writeJSON(w, http.StatusInternalServerError, dto.PlanTriggerResponse{
+			RunID: runID,
+			Error: err.Error(),
+		})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"run_id": runID,
-		"status": "success",
+	writeJSON(w, http.StatusOK, dto.PlanTriggerResponse{
+		RunID:  runID,
+		Status: "success",
 	})
 }
