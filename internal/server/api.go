@@ -14,28 +14,18 @@ import (
 
 	"github.com/schaermu/quadsyncd/internal/quadlet"
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	"github.com/schaermu/quadsyncd/internal/server/dto"
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 )
 
-// OverviewRepo describes a configured repository in the overview response.
-type OverviewRepo struct {
-	URL string `json:"url"`
-	Ref string `json:"ref,omitempty"`
-	SHA string `json:"sha,omitempty"`
-}
+// OverviewRepo is an alias for the DTO type, kept for backward compatibility.
+type OverviewRepo = dto.OverviewRepo
 
-// OverviewResponse is the response shape for GET /api/overview.
-type OverviewResponse struct {
-	Repositories  []OverviewRepo `json:"repositories"`
-	LastRunID     string         `json:"last_run_id,omitempty"`
-	LastRunStatus string         `json:"last_run_status,omitempty"`
-}
+// OverviewResponse is an alias for the DTO type, kept for backward compatibility.
+type OverviewResponse = dto.OverviewResponse
 
-// RunsListResponse is the response shape for GET /api/runs.
-type RunsListResponse struct {
-	Items      []runstore.RunMeta `json:"items"`
-	NextCursor string             `json:"next_cursor,omitempty"`
-}
+// RunsListResponse is an alias for the DTO type, kept for backward compatibility.
+type RunsListResponse = dto.RunsListResponse
 
 // RunLogsResponse is the response shape for GET /api/runs/{id}/logs.
 type RunLogsResponse struct {
@@ -152,9 +142,9 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("failed to load sync state for overview", "error", err)
 	}
 
-	overviewRepos := make([]OverviewRepo, len(repos))
+	overviewRepos := make([]dto.OverviewRepo, len(repos))
 	for i, spec := range repos {
-		or := OverviewRepo{URL: spec.URL, Ref: spec.Ref}
+		or := dto.OverviewRepo{URL: spec.URL, Ref: spec.Ref}
 		if state.Revisions != nil {
 			if sha, ok := state.Revisions[spec.URL]; ok {
 				or.SHA = sha
@@ -166,7 +156,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		overviewRepos[i] = or
 	}
 
-	resp := OverviewResponse{Repositories: overviewRepos}
+	resp := dto.OverviewResponse{Repositories: overviewRepos}
 
 	if runs, err := s.store.List(ctx); err == nil && len(runs) > 0 {
 		resp.LastRunID = runs[0].ID
@@ -198,7 +188,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, nextCursor := paginateSlice(runs, offset, limit)
-	writeJSON(w, http.StatusOK, RunsListResponse{Items: items, NextCursor: nextCursor})
+	writeJSON(w, http.StatusOK, dto.RunsListResponseFromMetas(items, nextCursor))
 }
 
 // handleRunDetail serves GET /api/runs/{id}.
@@ -215,7 +205,7 @@ func (s *Server) handleRunDetail(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	writeJSON(w, http.StatusOK, meta)
+	writeJSON(w, http.StatusOK, dto.RunResponseFromMeta(meta))
 }
 
 // handleRunLogs serves GET /api/runs/{id}/logs?level=&component=&q=&since=&limit=&cursor=.
@@ -329,7 +319,7 @@ func (s *Server) handleRunPlan(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
-	writeJSON(w, http.StatusOK, plan)
+	writeJSON(w, http.StatusOK, dto.PlanResponseFromPlan(plan))
 }
 
 // handleUnits serves GET /api/units.
