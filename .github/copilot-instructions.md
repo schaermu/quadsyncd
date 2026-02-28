@@ -26,19 +26,15 @@ rootless Podman + systemd user environment.
 | Git client interface | `internal/git/` |
 | systemd user interface | `internal/systemduser/` |
 | Quadlet discovery + unit naming | `internal/quadlet/` |
-| Webhook server + signature verification | `internal/webhook/` |
+| Webhook server + Web UI/API | `internal/webhook/` |
 | Test helpers / mocks | `internal/testutil/` |
 | systemd unit files | `packaging/systemd/user/` |
 | Integration tests (Tier 1) | `integration/tier1/` |
 | E2E discovery tests | `e2e/` |
 
-## Validation (match CI)
+## Validation
 
-CI is authoritative: see `.github/workflows/ci.yml`. Local equivalents via `Makefile`:
-
-```bash
-go mod tidy && git diff --exit-code && make fmt && make lint && make test && make vuln
-```
+CI is authoritative: see `.github/workflows/ci.yml`. Local equivalents via `Makefile`.
 
 ## Domain invariants
 
@@ -51,13 +47,6 @@ go mod tidy && git diff --exit-code && make fmt && make lint && make test && mak
   - `all-managed` → `try-restart` every managed unit
 - **Webhook:** bind `127.0.0.1` only; verify HMAC-SHA256 signature before
   any processing; reject unsigned/invalid requests with HTTP 403.
-
-## Reusable prompts
-
-Common tasks have step-by-step prompt files in `.github/prompts/`:
-
-- **Add a config field** → `.github/prompts/add-config-field.prompt.md`
-- **Add a quadlet extension** → `.github/prompts/add-quadlet-extension.prompt.md`
 
 ## Scoped instructions
 
