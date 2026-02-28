@@ -122,6 +122,25 @@ type Plan struct {
 	Ops       []PlanOp          `json:"ops"`
 }
 
+// ReadWriter abstracts run storage operations for testability.
+type ReadWriter interface {
+	Create(ctx context.Context, meta *RunMeta) error
+	Update(ctx context.Context, meta *RunMeta) error
+	Get(ctx context.Context, id string) (*RunMeta, error)
+	List(ctx context.Context) ([]RunMeta, error)
+	AppendLog(ctx context.Context, id string, line []byte) error
+	ReadLog(ctx context.Context, id string) ([]map[string]interface{}, error)
+	WritePlan(ctx context.Context, id string, plan Plan) error
+	ReadPlan(ctx context.Context, id string) (*Plan, error)
+	WriteArtifact(ctx context.Context, id, name string, content []byte) error
+	ReadArtifact(ctx context.Context, id, name string) ([]byte, error)
+	WorkDirForRun(id string) (string, error)
+	Prune(ctx context.Context, maxAge time.Duration) error
+}
+
+// Compile-time check that *Store satisfies ReadWriter.
+var _ ReadWriter = (*Store)(nil)
+
 // Store manages run storage on the filesystem.
 type Store struct {
 	baseDir string
