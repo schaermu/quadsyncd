@@ -32,6 +32,9 @@ var (
 	logLevel  string
 	logFormat string
 	dryRun    bool
+
+	// Serve command flags
+	skipInitialSync bool
 )
 
 func main() {
@@ -90,6 +93,9 @@ func init() {
 
 	// Sync command flags
 	syncCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be done without making changes")
+
+	// Serve command flags
+	serveCmd.Flags().BoolVar(&skipInitialSync, "skip-initial-sync", false, "skip the initial sync on startup (useful for local testing)")
 
 	// Add commands
 	rootCmd.AddCommand(syncCmd)
@@ -256,6 +262,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	server, err := server.NewServer(cfg, runnerFactory, systemdClient, store, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create webhook server: %w", err)
+	}
+
+	if skipInitialSync {
+		server.SetSkipInitialSync(true)
 	}
 
 	// Check for systemd socket activation
