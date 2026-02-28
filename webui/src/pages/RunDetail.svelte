@@ -34,7 +34,6 @@
   let wrapLogs = $state(false);
   let levelFilter = $state("");
   let searchFilter = $state("");
-  let cleanup: (() => void) | undefined;
   let abortController: AbortController | undefined;
 
   async function load() {
@@ -77,8 +76,7 @@
     const _id = params.id;
     load();
 
-    cleanup?.();
-    cleanup = onSSEEvent((kind, payload) => {
+    const unsubscribe = onSSEEvent((kind, payload) => {
       if (payload.run_id !== _id) return;
       if (kind === "run_updated") {
         load();
@@ -94,11 +92,14 @@
           .catch(() => {});
       }
     });
+
+    return () => {
+      unsubscribe();
+    };
   });
 
   onDestroy(() => {
     abortController?.abort();
-    cleanup?.();
   });
 </script>
 
