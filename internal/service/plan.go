@@ -116,7 +116,7 @@ func (p *PlanService) Execute(ctx context.Context, req runstore.PlanRequest) (st
 		meta.Revisions = result.Revisions
 		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
 		for i, c := range result.Conflicts {
-			meta.Conflicts[i] = runstore.ConflictSummaryFromSync(c)
+			meta.Conflicts[i] = conflictSummaryFromSync(c)
 		}
 	}
 

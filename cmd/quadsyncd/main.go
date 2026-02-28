@@ -17,7 +17,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/runstore"
 	"github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
-	"github.com/schaermu/quadsyncd/internal/webhook"
+	"github.com/schaermu/quadsyncd/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -253,7 +253,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	runnerFactory := sync.NewRunnerFactory(gitFactory, systemdClient)
 
 	// Create webhook server
-	server, err := webhook.NewServer(cfg, runnerFactory, systemdClient, store, logger)
+	server, err := server.NewServer(cfg, runnerFactory, systemdClient, store, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create webhook server: %w", err)
 	}
