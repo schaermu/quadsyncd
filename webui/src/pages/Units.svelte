@@ -45,12 +45,12 @@
       <table class="table table-sm">
         <thead>
           <tr>
-            <th>Unit Name</th>
-            <th>Source Path</th>
-            <th>Source Repo</th>
-            <th>Ref</th>
-            <th>SHA</th>
-            <th>Hash</th>
+            <th scope="col">Unit Name</th>
+            <th scope="col">Source Path</th>
+            <th scope="col">Source Repo</th>
+            <th scope="col">Ref</th>
+            <th scope="col">SHA</th>
+            <th scope="col">Hash</th>
           </tr>
         </thead>
         <tbody>

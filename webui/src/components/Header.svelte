@@ -7,7 +7,7 @@
     getConnectionState,
     onConnectionStateChange,
   } from "../lib/sse";
-  import { link } from "svelte-spa-router";
+  import { link, location } from "svelte-spa-router";
 
   let sseState = $state(getConnectionState());
   let theme = $state(getCurrentTheme());
@@ -30,6 +30,11 @@
     theme = toggleTheme();
   }
 
+  function isActive(path: string): boolean {
+    if (path === "/") return $location === "/";
+    return $location.startsWith(path);
+  }
+
   const sseIndicator = $derived.by(() => {
     switch (sseState) {
       case "connected":
@@ -48,15 +53,17 @@
   </div>
   <div class="navbar-center hidden sm:flex">
     <nav class="flex gap-1">
-      <a href="/" use:link class="btn btn-ghost btn-sm">Dashboard</a>
-      <a href="/runs" use:link class="btn btn-ghost btn-sm">Runs</a>
-      <a href="/plan" use:link class="btn btn-ghost btn-sm">Plan</a>
-      <a href="/units" use:link class="btn btn-ghost btn-sm">Units</a>
+      <a href="/" use:link class="btn btn-ghost btn-sm {isActive('/') ? 'btn-active' : ''}">Dashboard</a>
+      <a href="/runs" use:link class="btn btn-ghost btn-sm {isActive('/runs') ? 'btn-active' : ''}">Runs</a>
+      <a href="/plan" use:link class="btn btn-ghost btn-sm {isActive('/plan') ? 'btn-active' : ''}">Plan</a>
+      <a href="/units" use:link class="btn btn-ghost btn-sm {isActive('/units') ? 'btn-active' : ''}">Units</a>
     </nav>
   </div>
   <div class="navbar-end gap-2">
     <div
       class="flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-base-300"
+      role="status"
+      aria-live="polite"
       title="SSE connection: {sseState}"
     >
       <span class="inline-block w-2 h-2 rounded-full {sseIndicator.class}"
@@ -100,7 +107,7 @@
     </button>
     <!-- Mobile nav dropdown -->
     <div class="dropdown dropdown-end sm:hidden">
-      <div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-circle">
+      <div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-circle" aria-label="Open navigation menu">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="h-5 w-5"
@@ -120,10 +127,10 @@
         tabindex="0"
         class="menu menu-sm dropdown-content bg-base-200 rounded-box z-10 mt-3 w-40 p-2 shadow"
       >
-        <li><a href="/" use:link>Dashboard</a></li>
-        <li><a href="/runs" use:link>Runs</a></li>
-        <li><a href="/plan" use:link>Plan</a></li>
-        <li><a href="/units" use:link>Units</a></li>
+        <li><a href="/" use:link class="{isActive('/') ? 'active' : ''}">Dashboard</a></li>
+        <li><a href="/runs" use:link class="{isActive('/runs') ? 'active' : ''}">Runs</a></li>
+        <li><a href="/plan" use:link class="{isActive('/plan') ? 'active' : ''}">Plan</a></li>
+        <li><a href="/units" use:link class="{isActive('/units') ? 'active' : ''}">Units</a></li>
       </ul>
     </div>
   </div>
