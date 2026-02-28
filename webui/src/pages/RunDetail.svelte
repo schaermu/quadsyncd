@@ -39,14 +39,15 @@
   async function load() {
     abortController?.abort();
     abortController = new AbortController();
+    const signal = abortController.signal;
     loading = true;
     error = null;
     try {
-      const meta = await fetchRunDetail(params.id);
+      const meta = await fetchRunDetail(params.id, signal);
       run = meta;
       const [logsResp, planResp] = await Promise.allSettled([
-        fetchRunLogs(params.id, { limit: 500 }),
-        fetchRunPlan(params.id),
+        fetchRunLogs(params.id, { limit: 500 }, signal),
+        fetchRunPlan(params.id, signal),
       ]);
       logs =
         logsResp.status === "fulfilled" ? logsResp.value.items : [];
@@ -81,7 +82,7 @@
       if (kind === "run_updated") {
         load();
       } else if (kind === "log_appended" && payload.lines) {
-        const newLogs = [...logs, ...(payload.lines as LogEntry[])];
+        const newLogs = [...logs, ...payload.lines];
         logs =
           newLogs.length > MAX_LOG_ENTRIES
             ? newLogs.slice(newLogs.length - MAX_LOG_ENTRIES)

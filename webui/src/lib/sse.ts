@@ -54,12 +54,17 @@ export function onConnectionStateChange(
 
 export function connectSSE() {
   if (eventSource) return;
+  if (reconnectTimer !== null) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   setConnectionState("connecting");
 
   const es = new EventSource("/api/events");
   eventSource = es;
 
   es.onopen = () => {
+    reconnectTimer = null;
     setConnectionState("connected");
   };
 
@@ -67,8 +72,10 @@ export function connectSSE() {
     setConnectionState("disconnected");
     es.close();
     eventSource = null;
-    // Reconnect after 3 seconds
-    reconnectTimer = setTimeout(connectSSE, 3000);
+    if (reconnectTimer === null) {
+      // Reconnect after 3 seconds
+      reconnectTimer = setTimeout(connectSSE, 3000);
+    }
   };
 
   const eventKinds: SSEEventKind[] = [

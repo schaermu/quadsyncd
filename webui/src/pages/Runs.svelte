@@ -52,12 +52,9 @@
   onMount(() => {
     load();
     cleanup = onSSEEvent((kind, payload) => {
-      if (kind === "run_started" && payload.run_id) {
-        fetchRunDetail(payload.run_id)
-          .then((meta) => {
-            runs = [meta, ...runs.filter((r) => r.id !== meta.id)];
-          })
-          .catch(() => {});
+      if (kind === "run_started") {
+        // New runs shift pagination offsets; reload to keep cursor in sync.
+        debouncedLoad();
       } else if (kind === "run_updated" && payload.run_id) {
         fetchRunDetail(payload.run_id)
           .then((meta) => {

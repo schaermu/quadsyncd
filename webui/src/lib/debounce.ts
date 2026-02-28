@@ -1,7 +1,7 @@
 export function debounce<T extends (...args: unknown[]) => void>(
   fn: T,
   delay: number,
-): T & { cancel: () => void } {
+): ((...args: Parameters<T>) => void) & { cancel: () => void } {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const debounced = (...args: Parameters<T>) => {
     if (timer) clearTimeout(timer);
@@ -13,5 +13,5 @@ export function debounce<T extends (...args: unknown[]) => void>(
       timer = null;
     }
   };
-  return debounced as T & { cancel: () => void };
+  return debounced;
 }

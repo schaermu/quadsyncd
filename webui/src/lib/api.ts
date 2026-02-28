@@ -124,8 +124,8 @@ export function fetchRuns(
   return apiFetch(`/api/runs?${params}`);
 }
 
-export function fetchRunDetail(id: string): Promise<RunMeta> {
-  return apiFetch(`/api/runs/${encodeURIComponent(id)}`);
+export function fetchRunDetail(id: string, signal?: AbortSignal): Promise<RunMeta> {
+  return apiFetch(`/api/runs/${encodeURIComponent(id)}`, { signal });
 }
 
 export interface LogFilters {
@@ -140,6 +140,7 @@ export interface LogFilters {
 export function fetchRunLogs(
   id: string,
   filters: LogFilters = {},
+  signal?: AbortSignal,
 ): Promise<RunLogsResponse> {
   const params = new URLSearchParams();
   if (filters.level) params.set("level", filters.level);
@@ -148,11 +149,11 @@ export function fetchRunLogs(
   if (filters.since) params.set("since", filters.since);
   if (filters.limit) params.set("limit", String(filters.limit));
   if (filters.cursor) params.set("cursor", filters.cursor);
-  return apiFetch(`/api/runs/${encodeURIComponent(id)}/logs?${params}`);
+  return apiFetch(`/api/runs/${encodeURIComponent(id)}/logs?${params}`, { signal });
 }
 
-export function fetchRunPlan(id: string): Promise<Plan> {
-  return apiFetch(`/api/runs/${encodeURIComponent(id)}/plan`);
+export function fetchRunPlan(id: string, signal?: AbortSignal): Promise<Plan> {
+  return apiFetch(`/api/runs/${encodeURIComponent(id)}/plan`, { signal });
 }
 
 export function fetchUnits(): Promise<UnitsResponse> {
