@@ -31,6 +31,9 @@ rootless Podman + systemd user environment.
 | systemd unit files | `packaging/systemd/user/` |
 | Integration tests (Tier 1) | `integration/tier1/` |
 | E2E discovery tests | `e2e/` |
+| Web UI source (Svelte 5 SPA) | `webui/src/` |
+| Web UI API client + SSE | `webui/src/lib/` |
+| Web UI embedded dist (Go) | `internal/webui/` |
 
 ## Validation
 
@@ -55,3 +58,4 @@ File-type-specific rules live in `.github/instructions/`:
 - `go.instructions.md` – applies to `**/*.go`
 - `test.instructions.md` – applies to `**/*_test.go`
 - `yaml.instructions.md` – applies to `**/*.{yaml,yml}`
+- `webui.instructions.md` – applies to `webui/**`
