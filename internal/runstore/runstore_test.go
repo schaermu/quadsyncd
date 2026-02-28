@@ -3,7 +3,6 @@ package runstore
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +10,8 @@ import (
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/multirepo"
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
 
 func TestGenerateRunID(t *testing.T) {
 	id1, err := generateRunID()
@@ -58,7 +54,7 @@ func TestGenerateRunID(t *testing.T) {
 
 func TestStore_CreateAndGet(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -112,7 +108,7 @@ func TestStore_CreateAndGet(t *testing.T) {
 
 func TestStore_Update(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -155,7 +151,7 @@ func TestStore_Update(t *testing.T) {
 
 func TestStore_List(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	// Create multiple runs with different start times
@@ -213,7 +209,7 @@ func TestStore_List(t *testing.T) {
 
 func TestStore_AppendLogAndReadLog(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -266,7 +262,7 @@ func TestStore_AppendLogAndReadLog(t *testing.T) {
 
 func TestStore_ReadLog_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -295,7 +291,7 @@ func TestStore_ReadLog_MissingFile(t *testing.T) {
 
 func TestStore_WritePlanAndReadPlan(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -398,7 +394,7 @@ func TestStore_WritePlanAndReadPlan(t *testing.T) {
 
 func TestStore_ReadPlan_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -426,7 +422,7 @@ func TestStore_ReadPlan_MissingFile(t *testing.T) {
 
 func TestStore_WriteArtifactAndReadArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -459,7 +455,7 @@ func TestStore_WriteArtifactAndReadArtifact(t *testing.T) {
 
 func TestStore_ReadArtifact_MissingFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	meta := RunMeta{
@@ -487,7 +483,7 @@ func TestStore_ReadArtifact_MissingFile(t *testing.T) {
 
 func TestStore_Prune(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -549,7 +545,7 @@ func TestStore_Prune(t *testing.T) {
 
 func TestStore_Prune_PartialRuns(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -597,7 +593,7 @@ func TestStore_Prune_PartialRuns(t *testing.T) {
 
 func TestStore_MultiRepoMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	// Create a run with multi-repo metadata
@@ -725,7 +721,7 @@ func TestConflictSummaryFromMultirepo(t *testing.T) {
 
 func TestStore_Get_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	_, err := store.Get(ctx, "nonexistent-run-id")
@@ -740,7 +736,7 @@ func TestStore_Get_NotFound(t *testing.T) {
 
 func TestStore_List_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	store := NewStore(tmpDir, testLogger())
+	store := NewStore(tmpDir, testutil.TestLogger())
 	ctx := context.Background()
 
 	runs, err := store.List(ctx)

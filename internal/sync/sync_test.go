@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,64 +13,8 @@ import (
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/multirepo"
 	"github.com/schaermu/quadsyncd/internal/quadlet"
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
-
-// mockGitClient implements git.Client for testing.
-type mockGitClient struct {
-	commitHash string
-	err        error
-	called     bool
-	repoSetup  func(destDir string)
-}
-
-func (m *mockGitClient) EnsureCheckout(_ context.Context, _, _, destDir string) (string, error) {
-	m.called = true
-	if m.repoSetup != nil {
-		m.repoSetup(destDir)
-	}
-	return m.commitHash, m.err
-}
-
-// mockSystemd implements systemduser.Systemd for testing.
-type mockSystemd struct {
-	available      bool
-	availableErr   error
-	reloadErr      error
-	restartErr     error
-	validateErr    error
-	reloadCalled   bool
-	restartCalled  bool
-	validateCalled bool
-	restartedUnits []string
-}
-
-func (m *mockSystemd) IsAvailable(_ context.Context) (bool, error) {
-	return m.available, m.availableErr
-}
-
-func (m *mockSystemd) DaemonReload(_ context.Context) error {
-	m.reloadCalled = true
-	return m.reloadErr
-}
-
-func (m *mockSystemd) TryRestartUnits(_ context.Context, units []string) error {
-	m.restartCalled = true
-	m.restartedUnits = units
-	return m.restartErr
-}
-
-func (m *mockSystemd) ValidateQuadlets(_ context.Context, _ string) error {
-	m.validateCalled = true
-	return m.validateErr
-}
-
-func (m *mockSystemd) GetUnitStatus(_ context.Context, _ string) (string, error) {
-	return "inactive", nil
-}
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
 
 // buildPlanFromDir is a test helper that discovers files in srcDir and calls
 // buildPlanFromEffective — replacing the removed single-repo buildPlan method.
@@ -170,9 +113,7 @@ func TestBuildPlan(t *testing.T) {
 	}
 
 	// Create a discard logger for tests
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelError, // Only log errors during tests
-	}))
+	logger := testutil.TestLogger()
 
 	engine := &Engine{
 		cfg:    cfg,
@@ -222,7 +163,7 @@ func TestBuildPlan_CompanionFiles(t *testing.T) {
 		Sync: config.SyncConfig{Prune: false, Restart: config.RestartChanged},
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testutil.TestLogger()
 	engine := &Engine{cfg: cfg, logger: logger}
 
 	prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
@@ -253,7 +194,7 @@ func TestAllManagedUnits_IncludesUnchanged(t *testing.T) {
 	cfg := &config.Config{
 		Sync: config.SyncConfig{Restart: config.RestartAllManaged},
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	logger := testutil.TestLogger()
 	engine := &Engine{cfg: cfg, logger: logger}
 
 	// State has two managed quadlet files and one companion file.
@@ -313,7 +254,7 @@ func TestCopyFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	engine := &Engine{logger: testLogger()}
+	engine := &Engine{logger: testutil.TestLogger()}
 	if err := engine.copyFile(srcPath, dstPath); err != nil {
 		t.Fatalf("copyFile: %v", err)
 	}
@@ -335,7 +276,7 @@ func TestCopyFile(t *testing.T) {
 
 func TestCopyFile_NonExistentSource(t *testing.T) {
 	tmpDir := t.TempDir()
-	engine := &Engine{logger: testLogger()}
+	engine := &Engine{logger: testutil.TestLogger()}
 	err := engine.copyFile(filepath.Join(tmpDir, "no-such-file"), filepath.Join(tmpDir, "dst"))
 	if err == nil {
 		t.Fatal("expected error for non-existent source")
@@ -372,7 +313,7 @@ func TestApplyPlan(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{QuadletDir: quadletDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	plan := &Plan{
 		Add:    []FileOp{{SourcePath: addSrc, DestPath: filepath.Join(quadletDir, "new.container")}},
@@ -414,7 +355,7 @@ func TestApplyPlan_Delete(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{QuadletDir: quadletDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	plan := &Plan{
 		Add:    []FileOp{},
@@ -483,11 +424,11 @@ func TestHandleRestarts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sd := &mockSystemd{available: true}
+			sd := &testutil.MockSystemd{Available: true}
 			cfg := &config.Config{
 				Sync: config.SyncConfig{Restart: tc.restart},
 			}
-			engine := &Engine{cfg: cfg, systemd: sd, logger: testLogger()}
+			engine := &Engine{cfg: cfg, systemd: sd, logger: testutil.TestLogger()}
 
 			err := engine.handleRestarts(context.Background(), plan, state)
 			if tc.wantErr {
@@ -499,21 +440,21 @@ func TestHandleRestarts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tc.wantRestart && !sd.restartCalled {
+			if tc.wantRestart && !sd.RestartCalled {
 				t.Error("expected TryRestartUnits to be called")
 			}
-			if !tc.wantRestart && sd.restartCalled {
+			if !tc.wantRestart && sd.RestartCalled {
 				t.Error("TryRestartUnits should not be called")
 			}
-			if tc.wantRestart && len(sd.restartedUnits) != tc.wantUnitsCount {
-				t.Errorf("restarted %d units, want %d: %v", len(sd.restartedUnits), tc.wantUnitsCount, sd.restartedUnits)
+			if tc.wantRestart && len(sd.RestartedUnits) != tc.wantUnitsCount {
+				t.Errorf("restarted %d units, want %d: %v", len(sd.RestartedUnits), tc.wantUnitsCount, sd.RestartedUnits)
 			}
 		})
 	}
 }
 
 func TestAffectedUnits(t *testing.T) {
-	engine := &Engine{logger: testLogger()}
+	engine := &Engine{logger: testutil.TestLogger()}
 	plan := &Plan{
 		Add:    []FileOp{{DestPath: "/q/app.container"}},
 		Update: []FileOp{{DestPath: "/q/db.volume"}, {DestPath: "/q/app.env"}},
@@ -541,7 +482,7 @@ func TestBuildState(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{QuadletDir: filepath.Join(tmpDir, "q"), StateDir: stateDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	prevState := &State{
 		Commit: "old",
@@ -579,7 +520,7 @@ func TestLoadState_NonExistent(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{StateDir: tmpDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	state, err := engine.loadState()
 	if err != nil {
@@ -598,7 +539,7 @@ func TestSaveAndLoadState(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{StateDir: tmpDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	original := &State{
 		Commit: "abc123",
@@ -639,14 +580,14 @@ func TestRun_DryRun(t *testing.T) {
 	quadletDir := filepath.Join(tmpDir, "quadlet")
 	stateDir := filepath.Join(tmpDir, "state")
 
-	gitMock := &mockGitClient{
-		commitHash: "abc",
-		repoSetup: func(destDir string) {
+	gitMock := &testutil.MockGitClient{
+		CommitHash: "abc",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=alpine\n"), 0644)
 		},
 	}
-	sd := &mockSystemd{available: true}
+	sd := &testutil.MockSystemd{Available: true}
 
 	cfg := &config.Config{
 		Repository: &config.RepoSpec{URL: "file:///test", Ref: "main"},
@@ -654,19 +595,19 @@ func TestRun_DryRun(t *testing.T) {
 		Sync:       config.SyncConfig{Prune: true, Restart: config.RestartChanged},
 	}
 
-	engine := NewEngine(cfg, gitMock, sd, testLogger(), true)
+	engine := NewEngine(cfg, gitMock, sd, testutil.TestLogger(), true)
 
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run dry-run: %v", err)
 	}
 
-	if !gitMock.called {
+	if !gitMock.Called {
 		t.Error("git should be called in dry-run")
 	}
-	if sd.reloadCalled {
+	if sd.ReloadCalled {
 		t.Error("systemd reload should NOT be called in dry-run")
 	}
-	if sd.restartCalled {
+	if sd.RestartCalled {
 		t.Error("systemd restart should NOT be called in dry-run")
 	}
 	// Files should not be copied
@@ -680,14 +621,14 @@ func TestRun_FullSync(t *testing.T) {
 	quadletDir := filepath.Join(tmpDir, "quadlet")
 	stateDir := filepath.Join(tmpDir, "state")
 
-	gitMock := &mockGitClient{
-		commitHash: "def456",
-		repoSetup: func(destDir string) {
+	gitMock := &testutil.MockGitClient{
+		CommitHash: "def456",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "web.container"), []byte("[Container]\nImage=nginx\n"), 0644)
 		},
 	}
-	sd := &mockSystemd{available: true}
+	sd := &testutil.MockSystemd{Available: true}
 
 	cfg := &config.Config{
 		Repository: &config.RepoSpec{URL: "file:///test", Ref: "main"},
@@ -695,7 +636,7 @@ func TestRun_FullSync(t *testing.T) {
 		Sync:       config.SyncConfig{Prune: true, Restart: config.RestartChanged},
 	}
 
-	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
+	engine := NewEngine(cfg, gitMock, sd, testutil.TestLogger(), false)
 
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run full sync: %v", err)
@@ -715,18 +656,18 @@ func TestRun_FullSync(t *testing.T) {
 		t.Errorf("state file not saved: %v", err)
 	}
 
-	if !sd.reloadCalled {
+	if !sd.ReloadCalled {
 		t.Error("systemd reload should be called")
 	}
-	if !sd.restartCalled {
+	if !sd.RestartCalled {
 		t.Error("systemd restart should be called for changed units")
 	}
 }
 
 func TestRun_GitError(t *testing.T) {
 	tmpDir := t.TempDir()
-	gitMock := &mockGitClient{err: errors.New("clone failed")}
-	sd := &mockSystemd{available: true}
+	gitMock := &testutil.MockGitClient{Err: errors.New("clone failed")}
+	sd := &testutil.MockSystemd{Available: true}
 
 	cfg := &config.Config{
 		Repository: &config.RepoSpec{URL: "file:///test", Ref: "main"},
@@ -734,12 +675,12 @@ func TestRun_GitError(t *testing.T) {
 		Sync:       config.SyncConfig{Restart: config.RestartChanged},
 	}
 
-	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
+	engine := NewEngine(cfg, gitMock, sd, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error from git failure")
 	}
-	if !errors.Is(err, gitMock.err) {
+	if !errors.Is(err, gitMock.Err) {
 		t.Errorf("error should wrap git error: %v", err)
 	}
 }
@@ -748,14 +689,14 @@ func TestRun_SystemdUnavailable(t *testing.T) {
 	tmpDir := t.TempDir()
 	stateDir := filepath.Join(tmpDir, "state")
 
-	gitMock := &mockGitClient{
-		commitHash: "abc",
-		repoSetup: func(destDir string) {
+	gitMock := &testutil.MockGitClient{
+		CommitHash: "abc",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "x.container"), []byte("c"), 0644)
 		},
 	}
-	sd := &mockSystemd{available: false}
+	sd := &testutil.MockSystemd{Available: false}
 
 	cfg := &config.Config{
 		Repository: &config.RepoSpec{URL: "file:///test", Ref: "main"},
@@ -763,7 +704,7 @@ func TestRun_SystemdUnavailable(t *testing.T) {
 		Sync:       config.SyncConfig{Restart: config.RestartChanged},
 	}
 
-	engine := NewEngine(cfg, gitMock, sd, testLogger(), false)
+	engine := NewEngine(cfg, gitMock, sd, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when systemd unavailable")
@@ -771,7 +712,7 @@ func TestRun_SystemdUnavailable(t *testing.T) {
 }
 
 func TestLogPlanDetails(t *testing.T) {
-	engine := &Engine{logger: testLogger()}
+	engine := &Engine{logger: testutil.TestLogger()}
 	plan := &Plan{
 		Add:    []FileOp{{SourcePath: "/src/a.container", DestPath: "/dst/a.container"}},
 		Update: []FileOp{{SourcePath: "/src/b.container", DestPath: "/dst/b.container"}},
@@ -817,7 +758,7 @@ func TestBuildPlan_UpdateAndDelete(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: true, Restart: config.RestartChanged},
 	}
 
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	plan := buildPlanFromDir(t, engine, srcDir, prevState)
 
@@ -854,7 +795,7 @@ func TestLoadState_CorruptedJSON(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{StateDir: stateDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 	// Write invalid JSON
 	if err := os.WriteFile(cfg.StateFilePath(), []byte("{invalid json"), 0644); err != nil {
 		t.Fatal(err)
@@ -866,11 +807,11 @@ func TestLoadState_CorruptedJSON(t *testing.T) {
 }
 
 func TestHandleRestarts_ChangedNoQuadletChanges(t *testing.T) {
-	ms := &mockSystemd{available: true}
+	ms := &testutil.MockSystemd{Available: true}
 	cfg := &config.Config{
 		Sync: config.SyncConfig{Restart: config.RestartChanged},
 	}
-	engine := &Engine{cfg: cfg, systemd: ms, logger: testLogger()}
+	engine := &Engine{cfg: cfg, systemd: ms, logger: testutil.TestLogger()}
 	plan := &Plan{
 		Add: []FileOp{{DestPath: "/quadlet/myapp.env", SourcePath: "/src/myapp.env"}},
 	}
@@ -879,17 +820,17 @@ func TestHandleRestarts_ChangedNoQuadletChanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if ms.restartCalled {
+	if ms.RestartCalled {
 		t.Error("TryRestartUnits should not be called when there are no quadlet changes")
 	}
 }
 
 func TestHandleRestarts_AllManagedNoQuadletFiles(t *testing.T) {
-	ms := &mockSystemd{available: true}
+	ms := &testutil.MockSystemd{Available: true}
 	cfg := &config.Config{
 		Sync: config.SyncConfig{Restart: config.RestartAllManaged},
 	}
-	engine := &Engine{cfg: cfg, systemd: ms, logger: testLogger()}
+	engine := &Engine{cfg: cfg, systemd: ms, logger: testutil.TestLogger()}
 	plan := &Plan{}
 	state := &State{
 		ManagedFiles: map[string]ManagedFile{
@@ -900,7 +841,7 @@ func TestHandleRestarts_AllManagedNoQuadletFiles(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if ms.restartCalled {
+	if ms.RestartCalled {
 		t.Error("TryRestartUnits should not be called when there are no quadlet files")
 	}
 }
@@ -924,15 +865,15 @@ func TestRun_RecoversFromCorruptedState(t *testing.T) {
 	if err := os.WriteFile(stateFile, []byte("{corrupted"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
 		},
 	}
-	ms := &mockSystemd{available: true}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err != nil {
 		t.Fatalf("Run should recover from corrupted state, got error: %v", err)
@@ -955,15 +896,15 @@ func TestRun_HandleRestartsError(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartChanged},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
 		},
 	}
-	ms := &mockSystemd{available: true, restartErr: fmt.Errorf("restart failed")}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true, RestartErr: fmt.Errorf("restart failed")}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err != nil {
 		t.Errorf("Run should not fail due to restart error, got: %v", err)
@@ -982,15 +923,15 @@ func TestRun_DaemonReloadError(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
 		},
 	}
-	ms := &mockSystemd{available: true, reloadErr: fmt.Errorf("daemon-reload failed")}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true, ReloadErr: fmt.Errorf("daemon-reload failed")}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when DaemonReload fails, got nil")
@@ -1008,15 +949,15 @@ func TestRun_BuildPlanError(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: filepath.Join(tmpDir, "quadlet"), StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			// Create repo dir but NOT the subdir, so DiscoverAllFiles will fail
 			_ = os.MkdirAll(destDir, 0755)
 		},
 	}
-	ms := &mockSystemd{available: true}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Error("expected error when buildPlan fails, got nil")
@@ -1035,15 +976,15 @@ func TestRun_SaveStateError(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			_ = os.MkdirAll(destDir, 0755)
 			_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644)
 		},
 	}
-	ms := &mockSystemd{available: true}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	// Point the state file at a path whose parent is a regular file, not a
 	// directory. This deterministically prevents writing regardless of the
 	// user's privileges (including root), unlike a read-only chmod approach.
@@ -1076,28 +1017,28 @@ func TestRun_ValidateQuadletsError(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			if err := os.MkdirAll(destDir, 0755); err != nil {
-				t.Fatalf("repoSetup: MkdirAll: %v", err)
+				t.Fatalf("RepoSetup: MkdirAll: %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
-				t.Fatalf("repoSetup: WriteFile: %v", err)
+				t.Fatalf("RepoSetup: WriteFile: %v", err)
 			}
 		},
 	}
-	ms := &mockSystemd{available: true, validateErr: fmt.Errorf("invalid quadlet syntax")}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true, ValidateErr: fmt.Errorf("invalid quadlet syntax")}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when ValidateQuadlets fails, got nil")
 	}
-	if !ms.validateCalled {
+	if !ms.ValidateCalled {
 		t.Error("ValidateQuadlets should have been called")
 	}
 	// Sync should fail before daemon-reload when validation fails
-	if ms.reloadCalled {
+	if ms.ReloadCalled {
 		t.Error("DaemonReload should not be called when validation fails")
 	}
 	// State must not be saved on validation failure
@@ -1118,26 +1059,26 @@ func TestRun_ValidateQuadletsCalled(t *testing.T) {
 		Paths:      config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 		Sync:       config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
-	mg := &mockGitClient{
-		commitHash: "abc123",
-		repoSetup: func(destDir string) {
+	mg := &testutil.MockGitClient{
+		CommitHash: "abc123",
+		RepoSetup: func(destDir string) {
 			if err := os.MkdirAll(destDir, 0755); err != nil {
-				t.Fatalf("repoSetup: MkdirAll: %v", err)
+				t.Fatalf("RepoSetup: MkdirAll: %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]"), 0644); err != nil {
-				t.Fatalf("repoSetup: WriteFile: %v", err)
+				t.Fatalf("RepoSetup: WriteFile: %v", err)
 			}
 		},
 	}
-	ms := &mockSystemd{available: true}
-	engine := NewEngine(cfg, mg, ms, testLogger(), false)
+	ms := &testutil.MockSystemd{Available: true}
+	engine := NewEngine(cfg, mg, ms, testutil.TestLogger(), false)
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !ms.validateCalled {
+	if !ms.ValidateCalled {
 		t.Error("ValidateQuadlets should be called during a full sync")
 	}
-	if !ms.reloadCalled {
+	if !ms.ReloadCalled {
 		t.Error("DaemonReload should be called after successful validation")
 	}
 }
@@ -1145,18 +1086,6 @@ func TestRun_ValidateQuadletsCalled(t *testing.T) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Multi-repo integration tests
 // ──────────────────────────────────────────────────────────────────────────────
-
-// multiMockGitClient routes EnsureCheckout calls to per-URL handlers.
-type multiMockGitClient struct {
-	handlers map[string]*mockGitClient
-}
-
-func (m *multiMockGitClient) EnsureCheckout(ctx context.Context, url, ref, destDir string) (string, error) {
-	if h, ok := m.handlers[url]; ok {
-		return h.EnsureCheckout(ctx, url, ref, destDir)
-	}
-	return "", fmt.Errorf("no handler for URL %q", url)
-}
 
 func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -1175,17 +1104,17 @@ func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: true, Restart: config.RestartNone, ConflictHandling: config.ConflictPreferHighestPriority},
 	}
 
-	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+	mc := &testutil.MultiMockGitClient{Handlers: map[string]*testutil.MockGitClient{
 		url1: {
-			commitHash: "sha1",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha1",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=alpine\n"), 0644)
 			},
 		},
 		url2: {
-			commitHash: "sha2",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha2",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "db.container"), []byte("[Container]\nImage=postgres\n"), 0644)
 			},
@@ -1193,8 +1122,8 @@ func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
 	}}
 
 	factory := func(auth config.AuthConfig) git.Client { return mc }
-	sd := &mockSystemd{available: true}
-	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+	sd := &testutil.MockSystemd{Available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testutil.TestLogger(), false)
 
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run multi-repo: %v", err)
@@ -1208,7 +1137,7 @@ func TestRun_MultiRepo_DisjointFiles(t *testing.T) {
 	}
 
 	// State must record both repo revisions
-	eng := &Engine{cfg: cfg, logger: testLogger()}
+	eng := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 	state, err := eng.loadState()
 	if err != nil {
 		t.Fatalf("loadState: %v", err)
@@ -1241,17 +1170,17 @@ func TestRun_MultiRepo_ConflictPreferHighestPriority(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone, ConflictHandling: config.ConflictPreferHighestPriority},
 	}
 
-	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+	mc := &testutil.MultiMockGitClient{Handlers: map[string]*testutil.MockGitClient{
 		url1: {
-			commitHash: "sha-hi",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha-hi",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=winner\n"), 0644)
 			},
 		},
 		url2: {
-			commitHash: "sha-lo",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha-lo",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\nImage=loser\n"), 0644)
 			},
@@ -1259,8 +1188,8 @@ func TestRun_MultiRepo_ConflictPreferHighestPriority(t *testing.T) {
 	}}
 
 	factory := func(auth config.AuthConfig) git.Client { return mc }
-	sd := &mockSystemd{available: true}
-	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+	sd := &testutil.MockSystemd{Available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testutil.TestLogger(), false)
 
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run multi-repo conflict: %v", err)
@@ -1291,17 +1220,17 @@ func TestRun_MultiRepo_ConflictFail(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone, ConflictHandling: config.ConflictFail},
 	}
 
-	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+	mc := &testutil.MultiMockGitClient{Handlers: map[string]*testutil.MockGitClient{
 		url1: {
-			commitHash: "sha1",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha1",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "shared.container"), []byte("[Container]\nImage=a\n"), 0644)
 			},
 		},
 		url2: {
-			commitHash: "sha2",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha2",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "shared.container"), []byte("[Container]\nImage=b\n"), 0644)
 			},
@@ -1309,8 +1238,8 @@ func TestRun_MultiRepo_ConflictFail(t *testing.T) {
 	}}
 
 	factory := func(auth config.AuthConfig) git.Client { return mc }
-	sd := &mockSystemd{available: true}
-	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+	sd := &testutil.MockSystemd{Available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testutil.TestLogger(), false)
 
 	_, err := engine.Run(context.Background())
 	if err == nil {
@@ -1337,20 +1266,20 @@ func TestRun_MultiRepo_FailFast_OneRepoErrors(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartNone},
 	}
 
-	mc := &multiMockGitClient{handlers: map[string]*mockGitClient{
+	mc := &testutil.MultiMockGitClient{Handlers: map[string]*testutil.MockGitClient{
 		url1: {
-			commitHash: "sha1",
-			repoSetup: func(destDir string) {
+			CommitHash: "sha1",
+			RepoSetup: func(destDir string) {
 				_ = os.MkdirAll(destDir, 0755)
 				_ = os.WriteFile(filepath.Join(destDir, "app.container"), []byte("[Container]\n"), 0644)
 			},
 		},
-		url2: {err: errors.New("clone failed")},
+		url2: {Err: errors.New("clone failed")},
 	}}
 
 	factory := func(auth config.AuthConfig) git.Client { return mc }
-	sd := &mockSystemd{available: true}
-	engine := NewEngineWithFactory(cfg, factory, sd, testLogger(), false)
+	sd := &testutil.MockSystemd{Available: true}
+	engine := NewEngineWithFactory(cfg, factory, sd, testutil.TestLogger(), false)
 
 	_, err := engine.Run(context.Background())
 	if err == nil {
@@ -1370,7 +1299,7 @@ func TestBuildStateFromEffective_ProvenanceRecorded(t *testing.T) {
 	cfg := &config.Config{
 		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: stateDir},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger()}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
 
 	repoStates := []multirepo.RepoState{
 		{
@@ -1449,9 +1378,9 @@ func TestNewEngineWithPlanOptions_IsolatedWorkDir(t *testing.T) {
 	}
 
 	checkedOutTo := ""
-	mockGit := &mockGitClient{
-		commitHash: "plan-sha",
-		repoSetup: func(destDir string) {
+	mockGit := &testutil.MockGitClient{
+		CommitHash: "plan-sha",
+		RepoSetup: func(destDir string) {
 			checkedOutTo = destDir
 			// Write a test quadlet file into the checkout dir.
 			if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -1464,10 +1393,10 @@ func TestNewEngineWithPlanOptions_IsolatedWorkDir(t *testing.T) {
 	}
 
 	factory := func(_ config.AuthConfig) git.Client { return mockGit }
-	sys := &mockSystemd{}
+	sys := &testutil.MockSystemd{}
 
 	opts := PlanEngineOptions{WorkDir: workDir}
-	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), sys, testLogger(), opts)
+	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), sys, testutil.TestLogger(), opts)
 
 	result, err := engine.Run(context.Background())
 	if err != nil {
@@ -1522,9 +1451,9 @@ func TestNewEngineWithPlanOptions_SpecOverride_Commit(t *testing.T) {
 	}
 
 	var usedRef string
-	mockGit := &mockGitClient{
-		commitHash: "override-sha",
-		repoSetup: func(destDir string) {
+	mockGit := &testutil.MockGitClient{
+		CommitHash: "override-sha",
+		RepoSetup: func(destDir string) {
 			if err := os.MkdirAll(destDir, 0755); err != nil {
 				t.Fatalf("repoSetup MkdirAll: %v", err)
 			}
@@ -1544,7 +1473,7 @@ func TestNewEngineWithPlanOptions_SpecOverride_Commit(t *testing.T) {
 			repoURL: {Commit: "deadbeef"},
 		},
 	}
-	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(capturingFactory), &mockSystemd{}, testLogger(), opts)
+	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(capturingFactory), &testutil.MockSystemd{}, testutil.TestLogger(), opts)
 
 	if _, err := engine.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1575,9 +1504,9 @@ func TestNewEngineWithPlanOptions_SpecOverride_Ref(t *testing.T) {
 	}
 
 	var usedRef string
-	mockGit := &mockGitClient{
-		commitHash: "sha-for-feature",
-		repoSetup: func(destDir string) {
+	mockGit := &testutil.MockGitClient{
+		CommitHash: "sha-for-feature",
+		RepoSetup: func(destDir string) {
 			if err := os.MkdirAll(destDir, 0755); err != nil {
 				t.Fatalf("repoSetup MkdirAll: %v", err)
 			}
@@ -1593,7 +1522,7 @@ func TestNewEngineWithPlanOptions_SpecOverride_Ref(t *testing.T) {
 			repoURL: {Ref: "refs/heads/feature"},
 		},
 	}
-	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &mockSystemd{}, testLogger(), opts)
+	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &testutil.MockSystemd{}, testutil.TestLogger(), opts)
 	_, _ = engine.Run(context.Background()) // no quadlet files – result may be empty
 
 	if usedRef != "refs/heads/feature" {
@@ -1631,7 +1560,7 @@ func TestNewEngineWithPlanOptions_RepoFilter(t *testing.T) {
 		WorkDir:    workDir,
 		RepoFilter: "https://github.com/test/repo1.git",
 	}
-	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &mockSystemd{}, testLogger(), opts)
+	engine := NewEngineWithPlanOptions(cfg, GitClientFactory(factory), &testutil.MockSystemd{}, testutil.TestLogger(), opts)
 	_, _ = engine.Run(context.Background())
 
 	if len(calledURLs) != 1 || calledURLs[0] != "https://github.com/test/repo1.git" {
@@ -1661,7 +1590,7 @@ func TestNewEngineWithPlanOptions_RepoFilter_NoMatch(t *testing.T) {
 		WorkDir:    workDir,
 		RepoFilter: "https://github.com/test/DOES-NOT-EXIST.git",
 	}
-	engine := NewEngineWithPlanOptions(cfg, nil, &mockSystemd{}, testLogger(), opts)
+	engine := NewEngineWithPlanOptions(cfg, nil, &testutil.MockSystemd{}, testutil.TestLogger(), opts)
 	_, err := engine.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected error when repo_filter matches no configured repo")
@@ -1697,7 +1626,7 @@ func TestBuildPlanDriftAware_DriftedFileShowsUpdate(t *testing.T) {
 		Sync:  config.SyncConfig{Prune: false, Restart: config.RestartChanged},
 	}
 	// dryRun=true triggers drift-aware comparison
-	engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger(), dryRun: true}
 
 	// State says the file was last synced (same hash as drifted – simulating state mismatch)
 	driftedHash, _ := fileHash(filepath.Join(quadletDir, "app.container"))
@@ -1742,7 +1671,7 @@ func TestBuildPlanDriftAware_UpToDateFileNoOp(t *testing.T) {
 		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
 		Sync:  config.SyncConfig{Prune: false},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger(), dryRun: true}
 	prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
 
 	plan := buildPlanFromDir(t, engine, srcDir, prevState)
@@ -1767,7 +1696,7 @@ func TestBuildPlanDriftAware_DeleteSkippedWhenFileAbsent(t *testing.T) {
 		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
 		Sync:  config.SyncConfig{Prune: true},
 	}
-	engine := &Engine{cfg: cfg, logger: testLogger(), dryRun: true}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger(), dryRun: true}
 
 	// State tracks a file, but it is already gone from disk (manually deleted).
 	prevState := &State{
@@ -1784,9 +1713,9 @@ func TestBuildPlanDriftAware_DeleteSkippedWhenFileAbsent(t *testing.T) {
 	}
 }
 
-// capturingGitClient wraps a mockGitClient and records the ref argument.
+// capturingGitClient wraps a testutil.MockGitClient and records the ref argument.
 type capturingGitClient struct {
-	inner   *mockGitClient
+	inner   *testutil.MockGitClient
 	usedRef *string
 }
 

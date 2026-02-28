@@ -3,18 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	"github.com/schaermu/quadsyncd/internal/testutil"
 )
-
-func testLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-}
 
 func TestRunSync_CreatesRunRecord(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -45,7 +41,7 @@ sync:
 	}
 
 	// Create runstore
-	store := runstore.NewStore(cfg.Paths.StateDir, testLogger())
+	store := runstore.NewStore(cfg.Paths.StateDir, testutil.TestLogger())
 
 	// Create initial run metadata
 	meta := &runstore.RunMeta{
@@ -114,7 +110,7 @@ sync:
 	}
 
 	// Create runstore
-	store := runstore.NewStore(cfg.Paths.StateDir, testLogger())
+	store := runstore.NewStore(cfg.Paths.StateDir, testutil.TestLogger())
 
 	// Create run
 	meta := &runstore.RunMeta{
@@ -197,7 +193,7 @@ sync:
 		t.Fatalf("failed to load config: %v", err)
 	}
 
-	store := runstore.NewStore(cfg.Paths.StateDir, testLogger())
+	store := runstore.NewStore(cfg.Paths.StateDir, testutil.TestLogger())
 
 	// Create run
 	meta := &runstore.RunMeta{
