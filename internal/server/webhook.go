@@ -18,8 +18,8 @@ import (
 
 // GitHubPushEvent represents the relevant fields from a GitHub push webhook payload.
 type GitHubPushEvent struct {
-	Ref   string `json:"ref"`
-	After string `json:"after"`
+	Ref        string `json:"ref"`
+	After      string `json:"after"`
 	Repository struct {
 		FullName string `json:"full_name"`
 		CloneURL string `json:"clone_url"`

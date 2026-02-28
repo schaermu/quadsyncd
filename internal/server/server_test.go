@@ -510,7 +510,6 @@ func TestDebouncer(t *testing.T) {
 	}
 }
 
-
 func TestStartWithListener(t *testing.T) {
 	cfg, _ := setupTestConfig(t)
 	logger := testutil.TestLogger()
