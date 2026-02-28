@@ -20,6 +20,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/config"
 	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/runstore"
+	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/testutil"
 )
 
@@ -76,7 +77,7 @@ func TestNewServer(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, store, logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, store, logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestNewServer_MissingSecretFile(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	_, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, store, logger)
+	_, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, store, logger)
 	if err == nil {
 		t.Fatal("expected error for missing secret file, got nil")
 	}
@@ -119,7 +120,7 @@ func TestStart_PerformsInitialSync(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestVerifySignature(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestIsEventTypeAllowed(t *testing.T) {
 			mockGit := &testutil.MockGitClient{}
 			mockSys := &testutil.MockSystemd{Available: true}
 
-			server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+			server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -282,7 +283,7 @@ func TestIsRefAllowed(t *testing.T) {
 			mockGit := &testutil.MockGitClient{}
 			mockSys := &testutil.MockSystemd{Available: true}
 
-			server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+			server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -310,7 +311,7 @@ func TestHandleWebhook_ValidRequest(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestHandleWebhook_InvalidMethod(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -368,7 +369,7 @@ func TestHandleWebhook_InvalidContentType(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -391,7 +392,7 @@ func TestHandleWebhook_InvalidSignature(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -418,7 +419,7 @@ func TestHandleWebhook_DisallowedEventType(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -450,7 +451,7 @@ func TestHandleWebhook_DisallowedRef(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -534,7 +535,7 @@ func TestPerformSync_SingleFlight(t *testing.T) {
 	}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, func(_ config.AuthConfig) git.Client { return slowGit }, mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(func(_ config.AuthConfig) git.Client { return slowGit }, mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -618,7 +619,7 @@ func TestStartWithListener(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -769,7 +770,7 @@ func TestMatchesConfiguredRepo(t *testing.T) {
 			mockGit := &testutil.MockGitClient{}
 			mockSys := &testutil.MockSystemd{Available: true}
 
-			server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+			server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 			if err != nil {
 				t.Fatalf("NewServer() failed: %v", err)
 			}
@@ -796,7 +797,7 @@ func TestHandleWebhook_UnconfiguredRepo(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -848,7 +849,7 @@ func TestHandleWebhook_MultiRepo_MatchesSecondRepo(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -898,7 +899,7 @@ func TestHandleRoot(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -975,7 +976,7 @@ func TestHandleAssets(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1022,7 +1023,7 @@ func TestHandleAPI(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1096,7 +1097,7 @@ func TestHandlePlan(t *testing.T) {
 	mockGit := &testutil.MockGitClient{}
 	mockSys := &testutil.MockSystemd{Available: true}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(mockGit), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 	if err != nil {
 		t.Fatalf("NewServer() failed: %v", err)
 	}
@@ -1172,7 +1173,7 @@ Restart=always
 			},
 		}
 
-		serverWithRepo, err := NewServer(cfg, testutil.MockGitFactory(mockGitWithRepo), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+		serverWithRepo, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGitWithRepo), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
 		if err != nil {
 			t.Fatalf("NewServer() failed: %v", err)
 		}
@@ -1277,7 +1278,8 @@ func setupServerWithRuns(t *testing.T, runs []runstore.RunMeta) (*Server, *runst
 		}
 	}
 
-	server, err := NewServer(cfg, testutil.MockGitFactory(&testutil.MockGitClient{}), &testutil.MockSystemd{Available: true}, store, logger)
+	mockSystemd := &testutil.MockSystemd{Available: true}
+	server, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -1878,7 +1880,8 @@ func TestHandleUnits(t *testing.T) {
 
 		logger := testutil.TestLogger()
 		store := runstore.NewStore(cfg.Paths.StateDir, logger)
-		srv, err := NewServer(cfg, testutil.MockGitFactory(&testutil.MockGitClient{}), &testutil.MockSystemd{Available: true}, store, logger)
+		mockSystemd := &testutil.MockSystemd{Available: true}
+		srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
 		if err != nil {
 			t.Fatalf("NewServer: %v", err)
 		}
