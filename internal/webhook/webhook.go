@@ -565,7 +565,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("created plan run record", "run_id", meta.ID)
 
 	// Create a tee logger that writes to both console and runstore
-	var ndjsonLevel slog.Level = slog.LevelInfo
+	var ndjsonLevel = slog.LevelInfo
 	if leveler, ok := s.logger.Handler().(interface{ Level() slog.Level }); ok {
 		ndjsonLevel = leveler.Level()
 	}
@@ -1370,7 +1370,7 @@ func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.T
 
 	// Create a tee logger that writes to both console and runstore
 	// Use the same level as the console logger
-	var ndjsonLevel slog.Level = slog.LevelInfo
+	var ndjsonLevel = slog.LevelInfo
 	if leveler, ok := s.logger.Handler().(interface{ Level() slog.Level }); ok {
 		ndjsonLevel = leveler.Level()
 	}

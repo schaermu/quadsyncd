@@ -14,7 +14,7 @@ test:
 
 lint:
 	@echo "==> Running linter..."
-	@go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run
+	@golangci-lint run
 
 vuln:
 	@echo "==> Checking for vulnerabilities..."
@@ -28,6 +28,10 @@ build-webui:
 
 build: build-webui
 	@echo "==> Building binary..."
+	@go build -trimpath -o $(BINARY) ./cmd/quadsyncd
+
+build-codeql:
+	@echo "==> Building for CodeQL analysis..."
 	@go build -trimpath -o $(BINARY) ./cmd/quadsyncd
 
 clean:
