@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/schaermu/quadsyncd/internal/config"
-	"github.com/schaermu/quadsyncd/internal/git"
 	"github.com/schaermu/quadsyncd/internal/logging"
 	"github.com/schaermu/quadsyncd/internal/quadlet"
 	"github.com/schaermu/quadsyncd/internal/runstore"
@@ -45,14 +44,11 @@ type GitHubPushEvent struct {
 	} `json:"repository"`
 }
 
-// GitClientFactory creates a git.Client for a given AuthConfig.
-type GitClientFactory func(auth config.AuthConfig) git.Client
-
 // Server implements the webhook HTTP server
 type Server struct {
-	cfg         *config.Config
-	gitFactory  GitClientFactory
-	systemd     systemduser.Systemd
+	cfg           *config.Config
+	runnerFactory quadsyncd.RunnerFactory
+	systemd       systemduser.Systemd
 	logger      *slog.Logger
 	store       runstore.ReadWriter
 	broadcaster *Broadcaster
@@ -73,7 +69,7 @@ type debouncer struct {
 }
 
 // NewServer creates a new webhook server
-func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemduser.Systemd, store runstore.ReadWriter, logger *slog.Logger) (*Server, error) {
+func NewServer(cfg *config.Config, runnerFactory quadsyncd.RunnerFactory, systemd systemduser.Systemd, store runstore.ReadWriter, logger *slog.Logger) (*Server, error) {
 	// Validate required parameters
 	if store == nil {
 		return nil, fmt.Errorf("runstore.ReadWriter cannot be nil")
@@ -99,12 +95,12 @@ func NewServer(cfg *config.Config, gitFactory GitClientFactory, systemd systemdu
 	secret = []byte(strings.TrimSpace(string(secret)))
 
 	s := &Server{
-		cfg:        cfg,
-		gitFactory: gitFactory,
-		systemd:    systemd,
-		logger:     logger,
-		store:      store,
-		secret:     secret,
+		cfg:           cfg,
+		runnerFactory: runnerFactory,
+		systemd:       systemd,
+		logger:        logger,
+		store:         store,
+		secret:        secret,
 	}
 
 	// Initialize the embedded SPA file server.
@@ -617,7 +613,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		"repo_url", planReq.RepoURL,
 		"ref", planReq.Ref,
 		"commit", planReq.Commit)
-	engine := quadsyncd.NewEngineWithPlanOptions(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, planOpts)
+	engine := s.runnerFactory(s.cfg, logger, true, &planOpts)
 	result, planErr := engine.Run(ctx)
 
 	// Finalize run metadata
@@ -1361,7 +1357,7 @@ func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.T
 	if err := s.store.Create(ctx, meta); err != nil {
 		s.logger.Error("failed to create run record, continuing without instrumentation", "error", err)
 		// Run sync without runstore instrumentation
-		engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, s.logger, false)
+		engine := s.runnerFactory(s.cfg, s.logger, false, nil)
 		_, syncErr := engine.Run(ctx)
 		if syncErr != nil {
 			s.logger.Error("sync failed", "error", syncErr)
@@ -1395,7 +1391,7 @@ func (s *Server) executeInstrumentedSync(ctx context.Context, trigger runstore.T
 
 	// Run sync with instrumented logger
 	logger.Info("performing sync operation")
-	engine := quadsyncd.NewEngineWithFactory(s.cfg, quadsyncd.GitClientFactory(s.gitFactory), s.systemd, logger, false)
+	engine := s.runnerFactory(s.cfg, logger, false, nil)
 	result, syncErr := engine.Run(ctx)
 
 	// Finalize run metadata

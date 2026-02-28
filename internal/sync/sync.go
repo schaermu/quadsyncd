@@ -24,6 +24,35 @@ import (
 // Used to produce per-repo clients when auth overrides are configured.
 type GitClientFactory func(auth config.AuthConfig) git.Client
 
+// Runner executes a sync or plan operation and returns structured results.
+type Runner interface {
+	Run(ctx context.Context) (*Result, error)
+}
+
+// RunnerFactory creates a Runner for a given configuration.
+// When opts is nil, it creates a standard sync runner.
+// When opts is non-nil, it creates a plan runner with isolated workdir and overrides.
+type RunnerFactory func(
+	cfg *config.Config,
+	logger *slog.Logger,
+	dryRun bool,
+	opts *PlanEngineOptions,
+) Runner
+
+// NewRunnerFactory returns a RunnerFactory that creates Engine instances
+// using the given git client factory and systemd client.
+func NewRunnerFactory(gitFactory GitClientFactory, systemd systemduser.Systemd) RunnerFactory {
+	return func(cfg *config.Config, logger *slog.Logger, dryRun bool, opts *PlanEngineOptions) Runner {
+		if opts != nil {
+			return NewEngineWithPlanOptions(cfg, gitFactory, systemd, logger, *opts)
+		}
+		return NewEngineWithFactory(cfg, gitFactory, systemd, logger, dryRun)
+	}
+}
+
+// Compile-time check that *Engine satisfies Runner.
+var _ Runner = (*Engine)(nil)
+
 // Result contains the outcome of a sync operation.
 type Result struct {
 	Revisions map[string]string // repo_url -> commit_sha
