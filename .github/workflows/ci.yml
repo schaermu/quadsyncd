@@ -38,7 +38,9 @@ jobs:
             webui:
               - 'webui/**'
 
-  codeql:
+  codeql-go:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -47,14 +49,35 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
-        with:
-          go-version-file: go.mod
-          cache: true
       - uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
         with:
           languages: go
-      - uses: github/codeql-action/autobuild@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+          build-mode: none
+      - uses: github/codeql-action/analyze@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+
+  codeql-webui:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.webui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+      - uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+        with:
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
+      - name: Install webui dependencies
+        run: npm ci
+        working-directory: webui
       - uses: github/codeql-action/analyze@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
 
   lint:
@@ -200,7 +223,7 @@ jobs:
           retention-days: 1
 
   build:
-    needs: [codeql, lint, vuln-check, test, integration-test, webui-build]
+    needs: [codeql-go, codeql-webui, lint, vuln-check, test, integration-test, webui-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
@@ -259,7 +282,7 @@ jobs:
           color: ${{ steps.badge-color.outputs.color }}
 
   ci-success:
-    needs: [codeql, lint, vuln-check, test, integration-test, webui-build]
+    needs: [codeql-go, codeql-webui, lint, vuln-check, test, integration-test, webui-build]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
