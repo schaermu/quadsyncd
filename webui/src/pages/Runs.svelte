@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { fetchRuns, type RunMeta } from "../lib/api";
+  import { fetchRuns, fetchRunDetail, type RunMeta } from "../lib/api";
   import { onSSEEvent } from "../lib/sse";
+  import { debounce } from "../lib/debounce";
   import { formatTimestamp, formatRelativeTime } from "../lib/format";
   import StatusBadge from "../components/StatusBadge.svelte";
   import LoadingState from "../components/LoadingState.svelte";
@@ -14,6 +15,7 @@
   let runs = $state<RunMeta[]>([]);
   let nextCursor = $state<string | undefined>(undefined);
   let loadingMore = $state(false);
+  let loadMoreError = $state<string | null>(null);
   let cleanup: (() => void) | undefined;
 
   async function load() {
@@ -33,28 +35,41 @@
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
     loadingMore = true;
+    loadMoreError = null;
     try {
       const resp = await fetchRuns(20, nextCursor);
       runs = [...runs, ...resp.items];
       nextCursor = resp.next_cursor;
-    } catch {
-      // silently fail on load-more
+    } catch (e) {
+      loadMoreError = e instanceof Error ? e.message : "Failed to load more runs";
     } finally {
       loadingMore = false;
     }
   }
 
+  const debouncedLoad = debounce(load, 500);
+
   onMount(() => {
     load();
-    cleanup = onSSEEvent((kind) => {
-      if (kind === "run_started" || kind === "run_updated") {
-        load();
+    cleanup = onSSEEvent((kind, payload) => {
+      if (kind === "run_started") {
+        // New runs shift pagination offsets; reload to keep cursor in sync.
+        debouncedLoad();
+      } else if (kind === "run_updated" && payload.run_id) {
+        fetchRunDetail(payload.run_id)
+          .then((meta) => {
+            runs = runs.map((r) => (r.id === meta.id ? meta : r));
+          })
+          .catch(() => {
+            debouncedLoad();
+          });
       }
     });
   });
 
   onDestroy(() => {
     cleanup?.();
+    debouncedLoad.cancel();
   });
 </script>
 
@@ -113,7 +128,7 @@
     </div>
 
     {#if nextCursor}
-      <div class="flex justify-center">
+      <div class="flex flex-col items-center gap-1">
         <button
           class="btn btn-sm btn-outline"
           onclick={loadMore}
@@ -124,6 +139,9 @@
           {/if}
           Load More
         </button>
+        {#if loadMoreError}
+          <p class="text-error text-sm text-center mt-1">{loadMoreError}</p>
+        {/if}
       </div>
     {/if}
   {/if}

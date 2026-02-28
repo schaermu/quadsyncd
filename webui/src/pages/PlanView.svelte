@@ -24,8 +24,13 @@
   let cleanup: (() => void) | undefined;
 
   async function handleTriggerPlan() {
-    triggering = true;
+    // Clear previous results
+    plan = null;
+    planRun = null;
+    planRunId = null;
     triggerError = null;
+
+    triggering = true;
     try {
       const resp = await triggerPlan();
       planRunId = resp.run_id;

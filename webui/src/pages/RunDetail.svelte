@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import {
     fetchRunDetail,
     fetchRunLogs,
@@ -23,6 +23,8 @@
 
   let { params }: { params: { id: string } } = $props();
 
+  const MAX_LOG_ENTRIES = 5000;
+
   let loading = $state(true);
   let error = $state<string | null>(null);
   let run = $state<RunMeta | null>(null);
@@ -32,22 +34,26 @@
   let wrapLogs = $state(false);
   let levelFilter = $state("");
   let searchFilter = $state("");
-  let cleanup: (() => void) | undefined;
+  let abortController: AbortController | undefined;
 
   async function load() {
+    abortController?.abort();
+    abortController = new AbortController();
+    const signal = abortController.signal;
     loading = true;
     error = null;
     try {
-      const meta = await fetchRunDetail(params.id);
+      const meta = await fetchRunDetail(params.id, signal);
       run = meta;
       const [logsResp, planResp] = await Promise.allSettled([
-        fetchRunLogs(params.id, { limit: 500 }),
-        fetchRunPlan(params.id),
+        fetchRunLogs(params.id, { limit: 500 }, signal),
+        fetchRunPlan(params.id, signal),
       ]);
       logs =
         logsResp.status === "fulfilled" ? logsResp.value.items : [];
       plan = planResp.status === "fulfilled" ? planResp.value : null;
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       error = e instanceof Error ? e.message : "Failed to load run";
     } finally {
       loading = false;
@@ -67,22 +73,34 @@
     });
   });
 
-  onMount(() => {
+  $effect(() => {
+    const _id = params.id;
     load();
-    cleanup = onSSEEvent((kind, payload) => {
-      if (payload.run_id !== params.id) return;
+
+    const unsubscribe = onSSEEvent((kind, payload) => {
+      if (payload.run_id !== _id) return;
       if (kind === "run_updated") {
         load();
       } else if (kind === "log_appended" && payload.lines) {
-        logs = [...logs, ...(payload.lines as LogEntry[])];
+        const newLogs = [...logs, ...payload.lines];
+        logs =
+          newLogs.length > MAX_LOG_ENTRIES
+            ? newLogs.slice(newLogs.length - MAX_LOG_ENTRIES)
+            : newLogs;
       } else if (kind === "plan_ready") {
-        fetchRunPlan(params.id).then((p) => (plan = p)).catch(() => {});
+        fetchRunPlan(_id)
+          .then((p) => (plan = p))
+          .catch(() => {});
       }
     });
+
+    return () => {
+      unsubscribe();
+    };
   });
 
   onDestroy(() => {
-    cleanup?.();
+    abortController?.abort();
   });
 </script>
 

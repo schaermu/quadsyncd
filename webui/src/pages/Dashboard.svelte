@@ -9,6 +9,7 @@
     type TimerInfo,
   } from "../lib/api";
   import { onSSEEvent } from "../lib/sse";
+  import { debounce } from "../lib/debounce";
   import { formatTimestamp, formatRelativeTime, shortSha } from "../lib/format";
   import StatusBadge from "../components/StatusBadge.svelte";
   import LoadingState from "../components/LoadingState.svelte";
@@ -42,17 +43,20 @@
     }
   }
 
+  const debouncedLoad = debounce(load, 500);
+
   onMount(() => {
     load();
     cleanup = onSSEEvent((kind) => {
       if (kind === "run_started" || kind === "run_updated") {
-        load();
+        debouncedLoad();
       }
     });
   });
 
   onDestroy(() => {
     cleanup?.();
+    debouncedLoad.cancel();
   });
 </script>
 
