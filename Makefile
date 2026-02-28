@@ -30,6 +30,10 @@ build: build-webui
 	@echo "==> Building binary..."
 	@go build -trimpath -o $(BINARY) ./cmd/quadsyncd
 
+build-codeql:
+	@echo "==> Building for CodeQL analysis..."
+	@go build -trimpath -o $(BINARY) ./cmd/quadsyncd
+
 clean:
 	@echo "==> Cleaning..."
 	@rm -f $(BINARY)

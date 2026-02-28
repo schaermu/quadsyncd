@@ -1,26 +1,29 @@
-run:
-  timeout: 5m
-
-linters:
-  enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - typecheck
-    - unused
-    - unconvert
-    - unparam
-    - gofmt
-    - goimports
-    - misspell
-
-issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
-
+version: "2"
 output:
   formats:
-    - format: colored-line-number
+    text:
+      path: stdout
+linters:
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
