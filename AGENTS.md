@@ -96,7 +96,7 @@ If this document conflicts with README/docs/workflows:
 1. **Paths (never hardcode these outside config/tests):**
    - Quadlet files: `~/.config/containers/systemd/` (standard Podman rootless location)
    - State tracking: `~/.local/state/quadsyncd/state.json`
-   - Repo checkout: `~/.local/state/quadsyncd/repo/`
+   - Repo checkout: `~/.local/state/quadsyncd/repos/<repo-id>`
 
 2. **Systemd operations:**
    - Always use `systemctl --user` (not root)
@@ -160,7 +160,7 @@ Do not duplicate CI/build steps in agent instructions. Always refer to authorita
 
 ## Webhook Daemon
 
-The `quadsyncd serve` command runs the webhook daemon:
+The `quadsyncd serve` command runs the webhook daemon and embedded Web UI/API:
 
 ### Design Requirements
 
@@ -181,7 +181,7 @@ The `quadsyncd serve` command runs the webhook daemon:
 - Log all webhook events with structured fields (event type, ref, commit, result)
 - Return appropriate HTTP status codes:
   - `200`: Success
-  - `400`: Invalid payload/signature
+  - `400`: Invalid payload
   - `403`: Forbidden (signature mismatch)
   - `500`: Internal error (sync failed)
 
