@@ -194,7 +194,7 @@ func TestSystemd_GetUnitStatus_MissingBinaryReturnsError(t *testing.T) {
 	emptyDir := t.TempDir()
 	t.Setenv("PATH", emptyDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	status, err := c.GetUnitStatus(context.Background(), "app.service")
 	if err == nil {
 		t.Fatal("GetUnitStatus should return an error when systemctl is not found")
