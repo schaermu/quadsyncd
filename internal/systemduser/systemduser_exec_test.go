@@ -185,3 +185,24 @@ func TestSystemd_GetUnitStatus_InactiveNoError(t *testing.T) {
 		t.Errorf("status = %q, want %q", status, "inactive")
 	}
 }
+
+// TestSystemd_GetUnitStatus_MissingBinaryReturnsError verifies that
+// GetUnitStatus propagates a non-ExitError (e.g. binary not found) instead of
+// silently returning an empty status.
+func TestSystemd_GetUnitStatus_MissingBinaryReturnsError(t *testing.T) {
+	// Set PATH to an empty directory so systemctl cannot be found.
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+
+	c := NewClient()
+	status, err := c.GetUnitStatus(context.Background(), "app.service")
+	if err == nil {
+		t.Fatal("GetUnitStatus should return an error when systemctl is not found")
+	}
+	if status != "" {
+		t.Errorf("status should be empty on error, got %q", status)
+	}
+	if !strings.Contains(err.Error(), "systemctl is-active app.service") {
+		t.Errorf("error should contain context about the command, got: %v", err)
+	}
+}

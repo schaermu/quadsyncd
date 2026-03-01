@@ -2,6 +2,7 @@ package systemduser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -131,15 +132,22 @@ func (c *Client) RestartUnits(ctx context.Context, units []string) error {
 	return nil
 }
 
-// GetUnitStatus returns the status of a unit
+// GetUnitStatus returns the status of a unit.
+// Non-zero exit codes from systemctl is-active are expected for inactive or
+// failed units and are not treated as errors. Genuine failures (binary not
+// found, context cancelled, permission errors) are propagated.
 func (c *Client) GetUnitStatus(ctx context.Context, unit string) (string, error) {
 	cmd := exec.CommandContext(ctx, "systemctl", "--user", "is-active", unit)
 	output, err := cmd.Output()
 	status := strings.TrimSpace(string(output))
 
 	if err != nil {
-		// is-active returns non-zero for inactive units, but that's not an error
-		return status, nil
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			// is-active returns non-zero for inactive/failed units; not an error.
+			return status, nil
+		}
+		return "", fmt.Errorf("systemctl is-active %s: %w", unit, err)
 	}
 
 	return status, nil
