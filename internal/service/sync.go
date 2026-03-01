@@ -146,7 +146,7 @@ func (s *SyncService) executeSync(ctx context.Context, trigger runstore.TriggerS
 		meta.Revisions = result.Revisions
 		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
 		for i, c := range result.Conflicts {
-			meta.Conflicts[i] = conflictSummaryFromSync(c)
+			meta.Conflicts[i] = ConflictSummaryFromSync(c)
 		}
 	}
 
