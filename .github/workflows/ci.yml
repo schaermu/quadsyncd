@@ -137,6 +137,20 @@ jobs:
           go tool cover -func=coverage.txt > /tmp/coverage-func.txt
           echo "total=$(grep ^total /tmp/coverage-func.txt | awk '{print $3}')" >> $GITHUB_OUTPUT
 
+      - name: Check coverage threshold
+        env:
+          COVERAGE_TOTAL: ${{ steps.coverage.outputs.total }}
+        run: |
+          THRESHOLD=70
+          PCT="${COVERAGE_TOTAL%\%}"
+          COVERAGE="${PCT%.*}"
+          echo "Total coverage: ${COVERAGE}% (threshold: ${THRESHOLD}%)"
+          if [ "$COVERAGE" -lt "$THRESHOLD" ]; then
+            echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+            exit 1
+          fi
+          echo "Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+
       - name: Build coverage comment body
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
         id: coverage-comment

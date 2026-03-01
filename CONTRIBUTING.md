@@ -143,7 +143,7 @@ When adding functionality that interacts with external systems, define interface
 
 ### Test Coverage
 
-While we don't enforce a specific coverage percentage, new features should include:
+CI enforces a **minimum 70% total coverage** gate — PRs that drop coverage below this threshold will fail. New features should include:
 
 - Unit tests for core logic
 - Edge case handling (empty dirs, missing files, permission errors)
