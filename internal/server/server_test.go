@@ -1855,6 +1855,74 @@ func TestHandleUnits(t *testing.T) {
 		}
 	})
 
+	t.Run("companion files are excluded from units", func(t *testing.T) {
+		cfg, _ := setupTestConfig(t)
+		if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+
+		// State includes one real quadlet and two companion files that must not appear.
+		stateContent := `{
+"managed_files": {
+"/home/user/.config/containers/systemd/app.container": {
+"source_path": "app.container",
+"hash": "abc123",
+"source_repo": "https://github.com/test/repo.git",
+"source_ref": "refs/heads/main",
+"source_sha": "deadbeef"
+},
+"/home/user/.config/containers/systemd/dynamic.conf.yaml": {
+"source_path": "dynamic.conf.yaml",
+"hash": "def456",
+"source_repo": "https://github.com/test/repo.git",
+"source_ref": "refs/heads/main",
+"source_sha": "deadbeef"
+},
+"/home/user/.config/containers/systemd/traefik.yaml": {
+"source_path": "traefik.yaml",
+"hash": "ghi789",
+"source_repo": "https://github.com/test/repo.git",
+"source_ref": "refs/heads/main",
+"source_sha": "deadbeef"
+}
+}
+}`
+		if err := os.WriteFile(cfg.StateFilePath(), []byte(stateContent), 0644); err != nil {
+			t.Fatalf("WriteFile state: %v", err)
+		}
+
+		logger := testutil.TestLogger()
+		store := runstore.NewStore(cfg.Paths.StateDir, logger)
+		mockSystemd := &testutil.MockSystemd{Available: true}
+		srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
+		if err != nil {
+			t.Fatalf("NewServer: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/api/units", nil)
+		w := httptest.NewRecorder()
+		srv.handleAPI(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp UnitsResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Items) != 1 {
+			t.Fatalf("expected 1 unit (quadlet only), got %d: %v", len(resp.Items), resp.Items)
+		}
+		if resp.Items[0].Name != "app.service" {
+			t.Errorf("expected unit name app.service, got %q", resp.Items[0].Name)
+		}
+		for _, item := range resp.Items {
+			if item.Name == "dynamic.conf.service" || item.Name == "traefik.service" {
+				t.Errorf("companion file appeared as unit: %q", item.Name)
+			}
+		}
+	})
+
 	t.Run("POST returns 405", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/units", nil)
 		w := httptest.NewRecorder()

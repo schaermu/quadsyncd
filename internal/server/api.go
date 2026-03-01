@@ -328,6 +328,9 @@ func (s *Server) handleUnits(w http.ResponseWriter, _ *http.Request) {
 
 	items := make([]UnitInfo, 0, len(state.ManagedFiles))
 	for destPath, mf := range state.ManagedFiles {
+		if !quadlet.IsQuadletFile(destPath) {
+			continue
+		}
 		items = append(items, UnitInfo{
 			Name:       quadlet.UnitNameFromQuadlet(destPath),
 			SourcePath: mf.SourcePath,
