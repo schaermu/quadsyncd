@@ -5,9 +5,9 @@ import (
 	quadsyncd "github.com/schaermu/quadsyncd/internal/sync"
 )
 
-// conflictSummaryFromSync converts a sync.Conflict to a runstore.ConflictSummary.
-// It is the single canonical mapping used by SyncService and PlanService.
-func conflictSummaryFromSync(c quadsyncd.Conflict) runstore.ConflictSummary {
+// ConflictSummaryFromSync converts a sync.Conflict to a runstore.ConflictSummary.
+// It is the single canonical mapping used by all callers.
+func ConflictSummaryFromSync(c quadsyncd.Conflict) runstore.ConflictSummary {
 	losers := make([]runstore.EffectiveItemSummary, len(c.Losers))
 	for i, l := range c.Losers {
 		losers[i] = runstore.EffectiveItemSummary{
