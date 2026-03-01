@@ -54,3 +54,4 @@ Thumbs.db
 webui/node_modules/
 webui/dist/
 webui/.vscode/
+webui/coverage/
