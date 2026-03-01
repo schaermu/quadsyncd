@@ -83,6 +83,7 @@ All commit messages must follow the [Conventional Commits](https://www.conventio
 **Format:** `type(scope?): subject`
 
 **Allowed types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -93,12 +94,14 @@ All commit messages must follow the [Conventional Commits](https://www.conventio
 - `build`: Build system changes
 
 **Subject rules:**
+
 - Use imperative mood ("add feature" not "added feature")
 - Keep it short and lowercase
 - No trailing period
 - Scope is optional but encouraged (e.g., `sync`, `config`, `git`)
 
 **Body (optional):**
+
 - Use the body to explain the "why" when it's not obvious from the subject
 - Wrap at 72 characters
 
@@ -112,6 +115,46 @@ docs: clarify rootless systemd prerequisites
 refactor(config): isolate validation helpers
 
 feat(webhook): add github signature verification
+```
+
+### Pre-push Hooks (prek)
+
+The repository uses [prek](https://prek.j178.dev/) to enforce quality checks automatically on `git push`.
+Hooks run in workspace mode: Go checks run at the repo root, Svelte/TypeScript checks run only for `webui/` changes.
+
+**Install prek** (one-time, per-contributor):
+
+```bash
+# via mise (recommended — already used by this project)
+mise use prek
+
+# or via the standalone installer
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/j178/prek/releases/latest/download/prek-installer.sh | sh
+```
+
+**Wire the git hook** (one-time, per clone):
+
+```bash
+prek install
+```
+
+**Run hooks manually without pushing:**
+
+```bash
+# All hooks across the whole workspace
+prek run --hook-stage pre-push --all-files
+
+# Only webui hooks
+prek run webui/ --hook-stage pre-push --all-files
+
+# A single hook by id
+prek run go-test --hook-stage pre-push --all-files
+```
+
+**Skip a hook for one push** (use sparingly):
+
+```bash
+PREK_SKIP=govulncheck git push
 ```
 
 ### Pre-Commit Validation Loop
