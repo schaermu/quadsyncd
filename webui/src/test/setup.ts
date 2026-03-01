@@ -1,4 +1,4 @@
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 
 // jsdom does not implement matchMedia; provide a minimal stub
 Object.defineProperty(window, "matchMedia", {

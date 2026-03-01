@@ -15,6 +15,8 @@ export default defineConfig({
       provider: "v8",
       include: ["src/**/*.{ts,svelte}"],
       exclude: [
+        "src/**/*.test.ts",
+        "src/**/*.test.svelte.ts",
         "src/main.ts",
         "src/app.css",
         "src/assets/**",
