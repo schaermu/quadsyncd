@@ -2,6 +2,7 @@ package quadlet
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,13 +34,13 @@ func IsQuadletFile(path string) bool {
 func DiscoverFiles(dir string) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip directories
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 
@@ -64,20 +65,20 @@ func DiscoverFiles(dir string) ([]string, error) {
 func DiscoverAllFiles(dir string) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip hidden files and directories (e.g. .git, .gitignore)
-		if path != dir && strings.HasPrefix(info.Name(), ".") {
-			if info.IsDir() {
+		if path != dir && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if !info.IsDir() {
+		if !d.IsDir() {
 			files = append(files, path)
 		}
 		return nil
@@ -95,23 +96,23 @@ func DiscoverAllFiles(dir string) ([]string, error) {
 func DiscoverAllFilesWithSymlinkCheck(dir string) ([]string, error) {
 	var files []string
 
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Skip hidden files and directories (e.g. .git, .gitignore)
-		if path != dir && strings.HasPrefix(info.Name(), ".") {
-			if info.IsDir() {
+		if path != dir && strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		if !info.IsDir() {
-			// filepath.Walk uses os.Lstat internally, so info.Mode() already
+		if !d.IsDir() {
+			// filepath.WalkDir uses os.Lstat internally, so d.Type() already
 			// reflects the symlink mode bit without following the link.
-			if info.Mode()&os.ModeSymlink != 0 {
+			if d.Type()&os.ModeSymlink != 0 {
 				return fmt.Errorf("symlinks are not allowed in repo sources: %s", path)
 			}
 			files = append(files, path)
