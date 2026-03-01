@@ -2,12 +2,18 @@ package git
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// testLogger returns a discard logger suitable for tests.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+}
 
 // initBareRepo creates a bare-like local repo with an initial commit on the given branch.
 func initBareRepo(t *testing.T, dir, branch string) {
@@ -51,7 +57,7 @@ func TestEnsureCheckout_UpdatesLocalBranch(t *testing.T) {
 
 	// First checkout: clones the repo.
 	cloneDir := filepath.Join(t.TempDir(), "repo")
-	client := NewShellClient("", "")
+	client := NewShellClient("", "", testLogger())
 	commit1, err := client.EnsureCheckout(ctx, remoteDir, "main", cloneDir)
 	if err != nil {
 		t.Fatalf("first checkout: %v", err)
@@ -102,7 +108,7 @@ func TestEnsureCheckout_TagsStillWork(t *testing.T) {
 
 	// Checkout the tag.
 	cloneDir := filepath.Join(t.TempDir(), "repo")
-	client := NewShellClient("", "")
+	client := NewShellClient("", "", testLogger())
 	_, err := client.EnsureCheckout(ctx, remoteDir, "v1.0", cloneDir)
 	if err != nil {
 		t.Fatalf("tag checkout: %v", err)
@@ -203,7 +209,7 @@ func envValue(env []string, key string) (string, bool) {
 }
 
 func TestConfigureAuth_SSH(t *testing.T) {
-	client := &ShellClient{sshKeyFile: "/tmp/test-key"}
+	client := &ShellClient{sshKeyFile: "/tmp/test-key", logger: testLogger()}
 	cmd := exec.Command("git", "clone", "git@github.com:user/repo.git", "/dest")
 
 	if err := client.configureAuth(cmd, "git@github.com:user/repo.git"); err != nil {
@@ -225,7 +231,7 @@ func TestConfigureAuth_HTTPS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client := &ShellClient{httpsTokenFile: tokenFile}
+	client := &ShellClient{httpsTokenFile: tokenFile, logger: testLogger()}
 	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
 
 	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
@@ -258,7 +264,7 @@ func TestConfigureAuth_HTTPS(t *testing.T) {
 }
 
 func TestConfigureAuth_NoAuth(t *testing.T) {
-	client := &ShellClient{}
+	client := &ShellClient{logger: testLogger()}
 	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
 
 	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
@@ -278,7 +284,7 @@ func TestConfigureAuth_NoAuth(t *testing.T) {
 }
 
 func TestConfigureAuth_HTTPSTokenReadError(t *testing.T) {
-	client := &ShellClient{httpsTokenFile: filepath.Join(t.TempDir(), "nonexistent")}
+	client := &ShellClient{httpsTokenFile: filepath.Join(t.TempDir(), "nonexistent"), logger: testLogger()}
 	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
 
 	err := client.configureAuth(cmd, "https://github.com/user/repo.git")
@@ -291,7 +297,7 @@ func TestConfigureAuth_HTTPSTokenReadError(t *testing.T) {
 }
 
 func TestConfigureAuth_SSHWithHTTPSURL(t *testing.T) {
-	client := &ShellClient{sshKeyFile: "/tmp/test-key"}
+	client := &ShellClient{sshKeyFile: "/tmp/test-key", logger: testLogger()}
 	cmd := exec.Command("git", "clone", "https://github.com/user/repo.git", "/dest")
 
 	if err := client.configureAuth(cmd, "https://github.com/user/repo.git"); err != nil {
@@ -309,7 +315,7 @@ func TestConfigureAuth_HTTPSWithSSHURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client := &ShellClient{httpsTokenFile: tokenFile}
+	client := &ShellClient{httpsTokenFile: tokenFile, logger: testLogger()}
 	cmd := exec.Command("git", "clone", "git@github.com:user/repo.git", "/dest")
 
 	if err := client.configureAuth(cmd, "git@github.com:user/repo.git"); err != nil {

@@ -172,9 +172,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	// Create dependencies
 	factory := func(auth config.AuthConfig) git.Client {
-		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile)
+		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile, logger)
 	}
-	systemdClient := systemduser.NewClient()
+	systemdClient := systemduser.NewClient(logger)
 
 	// Create sync engine with tee logger
 	engine := sync.NewEngineWithFactory(cfg, factory, systemdClient, logger, dryRun)
@@ -236,9 +236,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// Create dependencies
 	gitFactory := func(auth config.AuthConfig) git.Client {
-		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile)
+		return git.NewShellClient(auth.SSHKeyFile, auth.HTTPSTokenFile, logger)
 	}
-	systemdClient := systemduser.NewClient()
+	systemdClient := systemduser.NewClient(logger)
 	runnerFactory := sync.NewRunnerFactory(gitFactory, systemdClient)
 
 	// Create webhook server
