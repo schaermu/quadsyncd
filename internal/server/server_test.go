@@ -2246,3 +2246,256 @@ func TestCSRFMiddleware_GetNonRootNoCSRFRequired(t *testing.T) {
 		t.Errorf("expected GET /api/runs to pass through without CSRF, got %d", w.Code)
 	}
 }
+
+// ---- Webhook robustness ----
+
+func TestHandleWebhook_ValidSignature_InvalidJSON(t *testing.T) {
+	server, _ := setupServerWithRuns(t, nil)
+
+	body := []byte(`this is not valid json!!!`)
+	sig := computeSignature(body, "test-secret-key")
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	req.Header.Set("X-GitHub-Event", "push")
+	w := httptest.NewRecorder()
+
+	server.handleWebhook(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for valid HMAC + invalid JSON, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleWebhook_BodyTooLarge_SignatureFails(t *testing.T) {
+	server, _ := setupServerWithRuns(t, nil)
+
+	// Body larger than 1 MB — LimitReader will silently truncate it, so the
+	// HMAC computed over the truncated bytes won't match the signature that
+	// was computed over the full body, resulting in a 403.
+	oversized := make([]byte, (1<<20)+100)
+	for i := range oversized {
+		oversized[i] = 'x'
+	}
+
+	// Sign the FULL body — after truncation the server's HMAC will mismatch.
+	sig := computeSignature(oversized, "test-secret-key")
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	req.Header.Set("X-GitHub-Event", "push")
+	w := httptest.NewRecorder()
+
+	server.handleWebhook(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 when oversized body causes HMAC mismatch, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestDebouncer_ConcurrentTriggers(t *testing.T) {
+	var callCount int
+	var mu sync.Mutex
+	d := &debouncer{delay: 80 * time.Millisecond}
+
+	const goroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			d.trigger(func() {
+				mu.Lock()
+				callCount++
+				mu.Unlock()
+			})
+		}()
+	}
+	wg.Wait()
+
+	// Wait long enough for the debounce timer to fire exactly once.
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	count := callCount
+	mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("expected callback to fire exactly once from %d concurrent triggers, got %d", goroutines, count)
+	}
+}
+
+// ---- API correctness edge cases ----
+
+func TestHandleOverview_SingleRepoCommitFallback(t *testing.T) {
+	// When state.json has a legacy top-level "commit" field but no "revisions"
+	// map, and the config has exactly one repo, the overview should surface
+	// that commit SHA.
+	cfg, _ := setupTestConfig(t)
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Write state.json with commit but no revisions entry.
+	stateContent := `{"commit":"fallbacksha123","managed_files":{}}`
+	if err := os.WriteFile(cfg.StateFilePath(), []byte(stateContent), 0644); err != nil {
+		t.Fatalf("WriteFile state: %v", err)
+	}
+
+	logger := testutil.TestLogger()
+	store := runstore.NewStore(cfg.Paths.StateDir, logger)
+	mockSystemd := &testutil.MockSystemd{Available: true}
+	srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	requireJSONContentType(t, w)
+
+	var resp OverviewResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Repositories) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(resp.Repositories))
+	}
+	if resp.Repositories[0].SHA != "fallbacksha123" {
+		t.Errorf("expected SHA fallbacksha123 from legacy commit field, got %q", resp.Repositories[0].SHA)
+	}
+}
+
+func TestHandleUnits_OrderStable(t *testing.T) {
+	// Multiple quadlet files must be returned sorted ascending by Name,
+	// regardless of map iteration order.
+	cfg, _ := setupTestConfig(t)
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	stateContent := `{
+"managed_files": {
+  "/home/user/.config/containers/systemd/zebra.container":   {"source_path":"zebra.container",   "hash":"h1"},
+  "/home/user/.config/containers/systemd/alpha.container":   {"source_path":"alpha.container",   "hash":"h2"},
+  "/home/user/.config/containers/systemd/middle.container":  {"source_path":"middle.container",  "hash":"h3"},
+  "/home/user/.config/containers/systemd/aardvark.container":{"source_path":"aardvark.container","hash":"h4"}
+}
+}`
+	if err := os.WriteFile(cfg.StateFilePath(), []byte(stateContent), 0644); err != nil {
+		t.Fatalf("WriteFile state: %v", err)
+	}
+
+	logger := testutil.TestLogger()
+	store := runstore.NewStore(cfg.Paths.StateDir, logger)
+	mockSystemd := &testutil.MockSystemd{Available: true}
+	srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(&testutil.MockGitClient{}), mockSystemd), mockSystemd, store, logger)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	// Run the request multiple times to shake out non-determinism from map
+	// iteration order.
+	want := []string{"aardvark.service", "alpha.service", "middle.service", "zebra.service"}
+	for iter := 0; iter < 10; iter++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/units", nil)
+		w := httptest.NewRecorder()
+		srv.handleAPI(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("iter %d: expected 200, got %d: %s", iter, w.Code, w.Body.String())
+		}
+		var resp UnitsResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("iter %d: decode: %v", iter, err)
+		}
+		if len(resp.Items) != len(want) {
+			t.Fatalf("iter %d: expected %d units, got %d", iter, len(want), len(resp.Items))
+		}
+		for i, item := range resp.Items {
+			if item.Name != want[i] {
+				t.Errorf("iter %d: position %d: expected %q, got %q", iter, i, want[i], item.Name)
+			}
+		}
+	}
+}
+
+func TestHandleRunLogs_InvalidSinceIgnored(t *testing.T) {
+	run := makeRun(runstore.RunKindSync, runstore.TriggerTimer)
+	server, store := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+	ctx := context.Background()
+	allRuns, _ := store.List(ctx)
+	runID := allRuns[0].ID
+
+	logLines := []string{
+		`{"time":"2026-01-01T10:00:00Z","level":"INFO","msg":"first"}`,
+		`{"time":"2026-01-01T10:00:01Z","level":"INFO","msg":"second"}`,
+	}
+	for _, line := range logLines {
+		if err := store.AppendLog(ctx, runID, []byte(line)); err != nil {
+			t.Fatalf("AppendLog: %v", err)
+		}
+	}
+
+	// An invalid since value must be silently ignored — all records returned.
+	req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?since=not-a-timestamp", nil)
+	w := httptest.NewRecorder()
+	server.handleAPI(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RunLogsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Errorf("expected all 2 records when since is invalid, got %d", len(resp.Items))
+	}
+}
+
+func TestHandleRunLogs_LevelCaseInsensitive(t *testing.T) {
+	run := makeRun(runstore.RunKindSync, runstore.TriggerTimer)
+	server, store := setupServerWithRuns(t, []runstore.RunMeta{run})
+
+	ctx := context.Background()
+	allRuns, _ := store.List(ctx)
+	runID := allRuns[0].ID
+
+	logLines := []string{
+		`{"time":"2026-01-01T10:00:00Z","level":"INFO","msg":"info message"}`,
+		`{"time":"2026-01-01T10:00:01Z","level":"ERROR","msg":"error message"}`,
+	}
+	for _, line := range logLines {
+		if err := store.AppendLog(ctx, runID, []byte(line)); err != nil {
+			t.Fatalf("AppendLog: %v", err)
+		}
+	}
+
+	// Passing level=ERROR (uppercase) must match records whose "level" is "ERROR".
+	req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/logs?level=ERROR", nil)
+	w := httptest.NewRecorder()
+	server.handleAPI(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RunLogsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Errorf("expected 1 ERROR record when using uppercase level filter, got %d", len(resp.Items))
+	}
+	if msg, _ := resp.Items[0]["msg"].(string); msg != "error message" {
+		t.Errorf("unexpected msg %q", msg)
+	}
+}

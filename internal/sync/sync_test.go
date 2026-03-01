@@ -1713,6 +1713,208 @@ func TestBuildPlanDriftAware_DeleteSkippedWhenFileAbsent(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Edge / negative tests added as part of the comprehensive test suite
+// ──────────────────────────────────────────────────────────────────────────────
+
+// TestBuildPlan_DryRun_DiskHashReadError verifies that buildPlanFromEffective
+// returns an error (mentioning the dest path) when an on-disk file exists but
+// cannot be read in dry-run mode.
+func TestBuildPlan_DryRun_DiskHashReadError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("cannot test permission errors as root")
+	}
+
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	srcDir := filepath.Join(tmpDir, "src")
+
+	if err := os.MkdirAll(quadletDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Source file
+	srcFile := filepath.Join(srcDir, "app.container")
+	if err := os.WriteFile(srcFile, []byte("[Container]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dest file exists but is unreadable (chmod 000)
+	destFile := filepath.Join(quadletDir, "app.container")
+	if err := os.WriteFile(destFile, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(destFile, 0000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(destFile, 0644) })
+
+	cfg := &config.Config{
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
+		Sync:  config.SyncConfig{Prune: false},
+	}
+	// dryRun=true triggers drift-aware disk hash comparison
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger(), dryRun: true}
+	prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
+
+	files, err := quadlet.DiscoverAllFiles(srcDir)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	items := make([]multirepo.EffectiveItem, 0, len(files))
+	for _, absPath := range files {
+		rel, _ := filepath.Rel(srcDir, absPath)
+		items = append(items, multirepo.EffectiveItem{
+			MergeKey: filepath.ToSlash(rel),
+			AbsPath:  absPath,
+		})
+	}
+
+	_, planErr := engine.buildPlanFromEffective(prevState, items)
+	if planErr == nil {
+		t.Fatal("expected error for unreadable dest file, got nil")
+	}
+	if !strings.Contains(planErr.Error(), destFile) {
+		t.Errorf("error should mention dest path %q; got: %v", destFile, planErr)
+	}
+}
+
+// TestBuildPlan_DeterministicOrdering verifies that Add ops in the plan are
+// always sorted by DestPath regardless of map iteration order.
+func TestBuildPlan_DeterministicOrdering(t *testing.T) {
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	srcDir := filepath.Join(tmpDir, "src")
+
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create files whose names would yield different orderings depending on
+	// map iteration — use names that sort predictably.
+	names := []string{"aaa.container", "bbb.container", "ccc.container", "ddd.container"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(srcDir, name), []byte("[Container]\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := &config.Config{
+		Paths: config.PathsConfig{QuadletDir: quadletDir, StateDir: tmpDir},
+		Sync:  config.SyncConfig{Prune: false},
+	}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
+	prevState := &State{ManagedFiles: make(map[string]ManagedFile)}
+
+	// Run buildPlan multiple times and confirm ordering is stable.
+	var firstOrder []string
+	for i := 0; i < 10; i++ {
+		plan := buildPlanFromDir(t, engine, srcDir, prevState)
+		if len(plan.Add) != len(names) {
+			t.Fatalf("iter %d: expected %d add ops, got %d", i, len(names), len(plan.Add))
+		}
+		order := make([]string, len(plan.Add))
+		for j, op := range plan.Add {
+			order[j] = op.DestPath
+		}
+		if i == 0 {
+			firstOrder = order
+			// Verify it is actually sorted
+			for k := 1; k < len(order); k++ {
+				if order[k] < order[k-1] {
+					t.Errorf("plan.Add not sorted: %v", order)
+				}
+			}
+		} else {
+			for k, p := range order {
+				if p != firstOrder[k] {
+					t.Errorf("iter %d: order differs at index %d: got %q, want %q", i, k, p, firstOrder[k])
+				}
+			}
+		}
+	}
+}
+
+// TestApplyPlan_CopyFailureMidway verifies that applyPlan returns an error
+// when a copy fails mid-execution, and that the already-copied files remain.
+func TestApplyPlan_CopyFailureMidway(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcDir := filepath.Join(tmpDir, "src")
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// First add op: source exists
+	good := filepath.Join(srcDir, "good.container")
+	if err := os.WriteFile(good, []byte("[Container]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Paths: config.PathsConfig{QuadletDir: quadletDir},
+	}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
+
+	plan := &Plan{
+		Add: []FileOp{
+			{SourcePath: good, DestPath: filepath.Join(quadletDir, "good.container")},
+			// Second op has a non-existent source → copy will fail
+			{SourcePath: filepath.Join(srcDir, "nonexistent.container"), DestPath: filepath.Join(quadletDir, "nonexistent.container")},
+		},
+		Update: []FileOp{},
+		Delete: []FileOp{},
+	}
+
+	err := engine.applyPlan(plan)
+	if err == nil {
+		t.Fatal("expected error when copy fails midway, got nil")
+	}
+
+	// The first file was copied before the failure – it must still exist.
+	if _, statErr := os.Stat(filepath.Join(quadletDir, "good.container")); os.IsNotExist(statErr) {
+		t.Error("already-copied file should remain on disk after midway failure")
+	}
+}
+
+// TestApplyPlan_DeleteFailureOnDirectory verifies that applyPlan surfaces an
+// error when os.Remove fails.  We point a Delete op at a non-empty directory,
+// which os.Remove cannot remove on any platform.
+func TestApplyPlan_DeleteFailureOnDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	quadletDir := filepath.Join(tmpDir, "quadlet")
+	if err := os.MkdirAll(quadletDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a non-empty subdirectory as the "target" – os.Remove refuses it.
+	targetDir := filepath.Join(quadletDir, "nonempty")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "child.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Paths: config.PathsConfig{QuadletDir: quadletDir},
+	}
+	engine := &Engine{cfg: cfg, logger: testutil.TestLogger()}
+
+	plan := &Plan{
+		Add:    []FileOp{},
+		Update: []FileOp{},
+		Delete: []FileOp{{DestPath: targetDir}},
+	}
+
+	if err := engine.applyPlan(plan); err == nil {
+		t.Fatal("expected error when deleting non-empty directory, got nil")
+	}
+}
+
 // capturingGitClient wraps a testutil.MockGitClient and records the ref argument.
 type capturingGitClient struct {
 	inner   *testutil.MockGitClient
