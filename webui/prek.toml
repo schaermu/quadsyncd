@@ -1,0 +1,24 @@
+# Orphan: files under webui/ are owned exclusively by this project.
+# The root config hooks will not run on these files.
+orphan = true
+
+default_install_hook_types = ["pre-push"]
+
+# Exclude build output and dependency directories
+exclude = { glob = ["node_modules/**", "dist/**", "coverage/**"] }
+
+[[repos]]
+repo = "local"
+
+hooks = [
+  # Svelte + TypeScript type checking
+  # svelte-check runs tsc under the hood; pass_filenames=false because it
+  # discovers sources via tsconfig, not via file arguments.
+  { id = "svelte-check", name = "svelte-check", language = "system", entry = "npm run check", pass_filenames = false, files = '\\.(svelte|ts|js)$', stages = [
+    "pre-push",
+  ] },
+  # Vitest unit tests
+  { id = "vitest", name = "vitest", language = "system", entry = "npm run test:ci", pass_filenames = false, files = '\\.(svelte|ts|js)$', stages = [
+    "pre-push",
+  ] },
+]
