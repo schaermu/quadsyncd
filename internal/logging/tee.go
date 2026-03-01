@@ -72,7 +72,7 @@ type NDJSONHandler struct {
 
 // NDJSONHandlerOptions configures an NDJSONHandler.
 type NDJSONHandlerOptions struct {
-	Level       slog.Level
+	Level       slog.Leveler // nil means LevelInfo (default); mirrors slog.HandlerOptions.Level
 	AddSource   bool
 	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 }
@@ -83,8 +83,8 @@ func NewNDJSONHandler(writeFunc func([]byte) error, opts *NDJSONHandlerOptions) 
 		opts = &NDJSONHandlerOptions{}
 	}
 	level := slog.LevelInfo
-	if opts.Level != 0 {
-		level = opts.Level
+	if opts.Level != nil {
+		level = opts.Level.Level()
 	}
 	return &NDJSONHandler{
 		level:       level,

@@ -206,3 +206,30 @@ func TestTeeHandler_Enabled(t *testing.T) {
 		t.Error("expected tee handler to be disabled for Debug level")
 	}
 }
+
+func TestNDJSONHandler_ExplicitLevelInfo(t *testing.T) {
+	h := NewNDJSONHandler(func([]byte) error { return nil }, &NDJSONHandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: true,
+	})
+	ctx := context.Background()
+
+	if !h.Enabled(ctx, slog.LevelInfo) {
+		t.Error("expected LevelInfo to be enabled when explicitly set")
+	}
+	if h.Enabled(ctx, slog.LevelDebug) {
+		t.Error("expected LevelDebug to be disabled")
+	}
+}
+
+func TestNDJSONHandler_NilLevelDefaultsToInfo(t *testing.T) {
+	h := NewNDJSONHandler(func([]byte) error { return nil }, &NDJSONHandlerOptions{})
+	ctx := context.Background()
+
+	if !h.Enabled(ctx, slog.LevelInfo) {
+		t.Error("expected LevelInfo to be enabled with nil Level")
+	}
+	if h.Enabled(ctx, slog.LevelDebug) {
+		t.Error("expected LevelDebug to be disabled with nil Level")
+	}
+}
