@@ -58,7 +58,7 @@ func TestSystemd_DaemonReload_UsesUserScope(t *testing.T) {
 	writeFakeBinary(t, binDir, "systemctl")
 	prependToPATH(t, binDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	if err := c.DaemonReload(context.Background()); err != nil {
 		t.Fatalf("DaemonReload: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestSystemd_TryRestartUnits_BuildsArgs(t *testing.T) {
 	writeFakeBinary(t, binDir, "systemctl")
 	prependToPATH(t, binDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	units := []string{"app.service", "db.service"}
 	if err := c.TryRestartUnits(context.Background(), units); err != nil {
 		t.Fatalf("TryRestartUnits: %v", err)
@@ -116,7 +116,7 @@ func TestSystemd_ValidateQuadlets_UsesQuadletDir(t *testing.T) {
 	writeFakeBinary(t, binDir, "podman-system-generator")
 	prependToPATH(t, binDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	quadletDir := t.TempDir()
 	if err := c.ValidateQuadlets(context.Background(), quadletDir); err != nil {
 		t.Fatalf("ValidateQuadlets: %v", err)
@@ -153,7 +153,7 @@ func TestSystemd_GetUnitStatus_ParsesActive(t *testing.T) {
 	}
 	prependToPATH(t, binDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	status, err := c.GetUnitStatus(context.Background(), "app.service")
 	if err != nil {
 		t.Fatalf("GetUnitStatus returned unexpected error: %v", err)
@@ -176,7 +176,7 @@ func TestSystemd_GetUnitStatus_InactiveNoError(t *testing.T) {
 	}
 	prependToPATH(t, binDir)
 
-	c := NewClient()
+	c := NewClient(testLogger())
 	status, err := c.GetUnitStatus(context.Background(), "app.service")
 	if err != nil {
 		t.Errorf("GetUnitStatus must not return error for inactive unit: %v", err)

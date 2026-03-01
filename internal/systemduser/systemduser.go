@@ -28,11 +28,13 @@ type Systemd interface {
 }
 
 // Client implements Systemd by shelling out to systemctl --user
-type Client struct{}
+type Client struct {
+	logger *slog.Logger
+}
 
 // NewClient creates a new systemd client
-func NewClient() *Client {
-	return &Client{}
+func NewClient(logger *slog.Logger) *Client {
+	return &Client{logger: logger}
 }
 
 // DaemonReload reloads systemd user daemon configuration
@@ -104,7 +106,7 @@ func (c *Client) quadletGeneratorPath() string {
 func (c *Client) ValidateQuadlets(ctx context.Context, quadletDir string) error {
 	generatorPath := c.quadletGeneratorPath()
 	if _, err := os.Stat(generatorPath); err != nil {
-		slog.Warn("podman-system-generator not found, skipping quadlet validation",
+		c.logger.Warn("podman-system-generator not found, skipping quadlet validation",
 			"path", generatorPath,
 			"quadlet_dir", quadletDir)
 		return nil

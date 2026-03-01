@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,13 +20,15 @@ type Client interface {
 type ShellClient struct {
 	sshKeyFile     string
 	httpsTokenFile string
+	logger         *slog.Logger
 }
 
 // NewShellClient creates a new git client that uses the git command
-func NewShellClient(sshKeyFile, httpsTokenFile string) *ShellClient {
+func NewShellClient(sshKeyFile, httpsTokenFile string, logger *slog.Logger) *ShellClient {
 	return &ShellClient{
 		sshKeyFile:     sshKeyFile,
 		httpsTokenFile: httpsTokenFile,
+		logger:         logger,
 	}
 }
 
@@ -45,6 +48,7 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 			return "", fmt.Errorf("failed to create parent directory: %w", err)
 		}
 
+		c.logger.Debug("cloning repository", "url", url, "dest", destDir)
 		cmd = exec.CommandContext(ctx, "git", "clone", "--no-checkout", url, destDir)
 		if err := c.configureAuth(cmd, url); err != nil {
 			return "", err
@@ -55,6 +59,7 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 		}
 	} else {
 		// Fetch updates
+		c.logger.Debug("fetching updates", "url", url, "dest", destDir)
 		cmd = exec.CommandContext(ctx, "git", "-C", destDir, "fetch", "origin")
 		if err := c.configureAuth(cmd, url); err != nil {
 			return "", err
@@ -70,6 +75,7 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 	// 1. Try direct checkout (works for local branches, tags, commit hashes)
 	// 2. If that fails, try as a remote branch (origin/ref)
 	// This handles tags and commit hashes correctly, and prefers local refs when they exist
+	c.logger.Debug("checking out ref", "ref", ref, "dest", destDir)
 	cmd = exec.CommandContext(ctx, "git", "-C", destDir, "checkout", "-f", ref)
 	if err := c.runCommand(cmd); err != nil {
 		// If direct checkout failed, try as a remote branch
@@ -85,7 +91,9 @@ func (c *ShellClient) EnsureCheckout(ctx context.Context, url, ref, destDir stri
 	// This is a no-op for fresh clones and silently ignored for tags/hashes.
 	if exists {
 		resetCmd := exec.CommandContext(ctx, "git", "-C", destDir, "reset", "--hard", "origin/"+ref)
-		_ = c.runCommand(resetCmd)
+		if err := c.runCommand(resetCmd); err != nil {
+			c.logger.Debug("reset to remote ref failed (expected for tags/hashes)", "ref", ref, "error", err)
+		}
 	}
 
 	// Get the commit hash
