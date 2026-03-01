@@ -16,6 +16,7 @@ import (
 	"github.com/schaermu/quadsyncd/internal/logging"
 	"github.com/schaermu/quadsyncd/internal/runstore"
 	"github.com/schaermu/quadsyncd/internal/server"
+	"github.com/schaermu/quadsyncd/internal/service"
 	"github.com/schaermu/quadsyncd/internal/sync"
 	"github.com/schaermu/quadsyncd/internal/systemduser"
 	"github.com/spf13/cobra"
@@ -200,25 +201,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		meta.Revisions = result.Revisions
 		meta.Conflicts = make([]runstore.ConflictSummary, len(result.Conflicts))
 		for i, c := range result.Conflicts {
-			losers := make([]runstore.EffectiveItemSummary, len(c.Losers))
-			for j, l := range c.Losers {
-				losers[j] = runstore.EffectiveItemSummary{
-					MergeKey:   c.MergeKey,
-					SourceRepo: l.Repo,
-					SourceRef:  l.Ref,
-					SourceSHA:  l.SHA,
-				}
-			}
-			meta.Conflicts[i] = runstore.ConflictSummary{
-				MergeKey: c.MergeKey,
-				Winner: runstore.EffectiveItemSummary{
-					MergeKey:   c.MergeKey,
-					SourceRepo: c.WinnerRepo,
-					SourceRef:  c.WinnerRef,
-					SourceSHA:  c.WinnerSHA,
-				},
-				Losers: losers,
-			}
+			meta.Conflicts[i] = service.ConflictSummaryFromSync(c)
 		}
 	}
 
