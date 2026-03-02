@@ -28,11 +28,13 @@
   });
 </script>
 
-<div class="p-4 max-w-5xl mx-auto space-y-4">
-  <h1 class="text-2xl font-bold">Managed Units</h1>
-  <p class="text-sm text-base-content/60">
-    Read-only view of Quadlet units currently managed by quadsyncd.
-  </p>
+<div class="page-shell page-stack">
+  <div class="page-head">
+    <h1 class="page-title">Managed Units</h1>
+    <p class="page-subtitle">
+      Read-only view of Quadlet units currently managed by quadsyncd.
+    </p>
+  </div>
 
   {#if loading}
     <LoadingState />
@@ -41,8 +43,8 @@
   {:else if units.length === 0}
     <EmptyState message="No managed units found." />
   {:else}
-    <div class="overflow-x-auto">
-      <table class="table table-sm">
+    <div class="table-shell overflow-x-auto">
+      <table class="table table-sm table-zebra">
         <thead>
           <tr>
             <th scope="col">Unit Name</th>

@@ -5,6 +5,8 @@ import {
   applyTheme,
   setTheme,
   toggleTheme,
+  LIGHT_THEME,
+  DARK_THEME,
 } from "./theme";
 
 describe("theme", () => {
@@ -26,13 +28,13 @@ describe("theme", () => {
     });
 
     it("returns stored light theme", () => {
-      localStorage.setItem("quadsyncd-theme", "quadsyncd-light");
-      expect(getStoredTheme()).toBe("quadsyncd-light");
+      localStorage.setItem("quadsyncd-theme", LIGHT_THEME);
+      expect(getStoredTheme()).toBe(LIGHT_THEME);
     });
 
     it("returns stored dark theme", () => {
-      localStorage.setItem("quadsyncd-theme", "quadsyncd-dark");
-      expect(getStoredTheme()).toBe("quadsyncd-dark");
+      localStorage.setItem("quadsyncd-theme", DARK_THEME);
+      expect(getStoredTheme()).toBe(DARK_THEME);
     });
 
     it("returns null for an unrecognized stored value", () => {
@@ -43,55 +45,55 @@ describe("theme", () => {
 
   describe("getCurrentTheme", () => {
     it("returns stored theme when one is set", () => {
-      localStorage.setItem("quadsyncd-theme", "quadsyncd-dark");
-      expect(getCurrentTheme()).toBe("quadsyncd-dark");
+      localStorage.setItem("quadsyncd-theme", DARK_THEME);
+      expect(getCurrentTheme()).toBe(DARK_THEME);
     });
 
     it("falls back to system theme when nothing is stored", () => {
-      // jsdom defaults to no matchMedia, so getSystemTheme returns quadsyncd-light
+      // jsdom defaults to no matchMedia, so getSystemTheme returns light
       const theme = getCurrentTheme();
-      expect(["quadsyncd-light", "quadsyncd-dark"]).toContain(theme);
+      expect([LIGHT_THEME, DARK_THEME]).toContain(theme);
     });
   });
 
   describe("applyTheme", () => {
     it("sets the data-theme attribute on documentElement", () => {
-      applyTheme("quadsyncd-dark");
-      expect(document.documentElement.getAttribute("data-theme")).toBe("quadsyncd-dark");
+      applyTheme(DARK_THEME);
+      expect(document.documentElement.getAttribute("data-theme")).toBe(DARK_THEME);
     });
 
     it("updates data-theme when called again with a different theme", () => {
-      applyTheme("quadsyncd-light");
-      applyTheme("quadsyncd-dark");
-      expect(document.documentElement.getAttribute("data-theme")).toBe("quadsyncd-dark");
+      applyTheme(LIGHT_THEME);
+      applyTheme(DARK_THEME);
+      expect(document.documentElement.getAttribute("data-theme")).toBe(DARK_THEME);
     });
   });
 
   describe("setTheme", () => {
     it("persists theme to localStorage", () => {
-      setTheme("quadsyncd-dark");
-      expect(localStorage.getItem("quadsyncd-theme")).toBe("quadsyncd-dark");
+      setTheme(DARK_THEME);
+      expect(localStorage.getItem("quadsyncd-theme")).toBe(DARK_THEME);
     });
 
     it("applies the theme to the document", () => {
-      setTheme("quadsyncd-light");
-      expect(document.documentElement.getAttribute("data-theme")).toBe("quadsyncd-light");
+      setTheme(LIGHT_THEME);
+      expect(document.documentElement.getAttribute("data-theme")).toBe(LIGHT_THEME);
     });
   });
 
   describe("toggleTheme", () => {
     it("toggles from light to dark", () => {
-      localStorage.setItem("quadsyncd-theme", "quadsyncd-light");
+      localStorage.setItem("quadsyncd-theme", LIGHT_THEME);
       const next = toggleTheme();
-      expect(next).toBe("quadsyncd-dark");
-      expect(localStorage.getItem("quadsyncd-theme")).toBe("quadsyncd-dark");
+      expect(next).toBe(DARK_THEME);
+      expect(localStorage.getItem("quadsyncd-theme")).toBe(DARK_THEME);
     });
 
     it("toggles from dark to light", () => {
-      localStorage.setItem("quadsyncd-theme", "quadsyncd-dark");
+      localStorage.setItem("quadsyncd-theme", DARK_THEME);
       const next = toggleTheme();
-      expect(next).toBe("quadsyncd-light");
-      expect(localStorage.getItem("quadsyncd-theme")).toBe("quadsyncd-light");
+      expect(next).toBe(LIGHT_THEME);
+      expect(localStorage.getItem("quadsyncd-theme")).toBe(LIGHT_THEME);
     });
   });
 });

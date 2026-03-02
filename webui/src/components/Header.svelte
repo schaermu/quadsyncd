@@ -47,26 +47,29 @@
   });
 </script>
 
-<header class="navbar bg-base-200 sticky top-0 z-50 shadow-sm">
-  <div class="navbar-start">
-    <a href="/" use:link class="btn btn-ghost text-lg font-bold">quadsyncd</a>
+<header
+  class="navbar sticky top-0 z-50 border-b border-base-content/10 bg-base-200/95 px-4 backdrop-blur"
+>
+  <div class="navbar-start gap-2">
+    <a href="/" use:link class="btn btn-ghost text-lg font-bold tracking-tight">quadsyncd</a>
+    <span class="badge badge-ghost badge-sm hidden md:inline-flex">web ui</span>
   </div>
   <div class="navbar-center hidden sm:flex">
-    <nav class="flex gap-1">
-      <a href="/" use:link class="btn btn-ghost btn-sm {isActive('/') ? 'btn-active' : ''}">Dashboard</a>
-      <a href="/runs" use:link class="btn btn-ghost btn-sm {isActive('/runs') ? 'btn-active' : ''}">Runs</a>
-      <a href="/plan" use:link class="btn btn-ghost btn-sm {isActive('/plan') ? 'btn-active' : ''}">Plan</a>
-      <a href="/units" use:link class="btn btn-ghost btn-sm {isActive('/units') ? 'btn-active' : ''}">Units</a>
+    <nav class="tabs tabs-box bg-base-300 p-1">
+      <a href="/" use:link class="tab tab-sm {isActive('/') ? 'tab-active' : ''}">Dashboard</a>
+      <a href="/runs" use:link class="tab tab-sm {isActive('/runs') ? 'tab-active' : ''}">Runs</a>
+      <a href="/plan" use:link class="tab tab-sm {isActive('/plan') ? 'tab-active' : ''}">Plan</a>
+      <a href="/units" use:link class="tab tab-sm {isActive('/units') ? 'tab-active' : ''}">Units</a>
     </nav>
   </div>
   <div class="navbar-end gap-2">
     <div
-      class="flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-base-300"
+      class="badge badge-sm badge-outline h-7 gap-1.5 px-2"
       role="status"
       aria-live="polite"
       title="SSE connection: {sseState}"
     >
-      <span class="inline-block w-2 h-2 rounded-full {sseIndicator.class}"
+      <span class="inline-block h-2 w-2 rounded-full {sseIndicator.class}"
       ></span>
       <span class="hidden sm:inline">{sseIndicator.label}</span>
     </div>
@@ -75,7 +78,7 @@
       onclick={handleToggleTheme}
       aria-label="Toggle theme"
     >
-      {#if theme === "quadsyncd-dark"}
+      {#if theme === "dark"}
         <svg
           xmlns="http://www.w3.org/2000/svg"
           class="h-5 w-5"
@@ -124,8 +127,7 @@
         </svg>
       </div>
       <ul
-        tabindex="0"
-        class="menu menu-sm dropdown-content bg-base-200 rounded-box z-10 mt-3 w-40 p-2 shadow"
+        class="menu menu-sm dropdown-content bg-base-200 rounded-box z-10 mt-3 w-44 border border-base-content/10 p-2 shadow-lg"
       >
         <li><a href="/" use:link class="{isActive('/') ? 'active' : ''}">Dashboard</a></li>
         <li><a href="/runs" use:link class="{isActive('/runs') ? 'active' : ''}">Runs</a></li>

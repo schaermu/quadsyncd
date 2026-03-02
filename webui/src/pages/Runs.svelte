@@ -41,7 +41,8 @@
       runs = [...runs, ...resp.items];
       nextCursor = resp.next_cursor;
     } catch (e) {
-      loadMoreError = e instanceof Error ? e.message : "Failed to load more runs";
+      loadMoreError =
+        e instanceof Error ? e.message : "Failed to load more runs";
     } finally {
       loadingMore = false;
     }
@@ -73,8 +74,13 @@
   });
 </script>
 
-<div class="p-4 max-w-5xl mx-auto space-y-4">
-  <h1 class="text-2xl font-bold">Runs</h1>
+<div class="page-shell page-stack">
+  <div class="page-head">
+    <h1 class="page-title">Runs</h1>
+    <p class="page-subtitle">
+      Chronological run history with status, trigger source, and timing.
+    </p>
+  </div>
 
   {#if loading}
     <LoadingState />
@@ -83,8 +89,8 @@
   {:else if runs.length === 0}
     <EmptyState message="No runs recorded yet." />
   {:else}
-    <div class="overflow-x-auto">
-      <table class="table table-sm">
+    <div class="table-shell overflow-x-auto">
+      <table class="table table-sm table-zebra">
         <thead>
           <tr>
             <th scope="col">ID</th>

@@ -1,22 +1,25 @@
 /** Theme management: light/dark with localStorage persistence. */
 
 const STORAGE_KEY = "quadsyncd-theme";
-type Theme = "quadsyncd-light" | "quadsyncd-dark";
+const LIGHT_THEME = "light";
+const DARK_THEME = "dark";
+
+type Theme = typeof LIGHT_THEME | typeof DARK_THEME;
 
 function getSystemTheme(): Theme {
   if (
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches
   ) {
-    return "quadsyncd-dark";
+    return DARK_THEME;
   }
-  return "quadsyncd-light";
+  return LIGHT_THEME;
 }
 
 export function getStoredTheme(): Theme | null {
   if (typeof localStorage === "undefined") return null;
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "quadsyncd-light" || stored === "quadsyncd-dark") {
+  if (stored === LIGHT_THEME || stored === DARK_THEME) {
     return stored;
   }
   return null;
@@ -38,7 +41,7 @@ export function setTheme(theme: Theme) {
 export function toggleTheme(): Theme {
   const current = getCurrentTheme();
   const next: Theme =
-    current === "quadsyncd-light" ? "quadsyncd-dark" : "quadsyncd-light";
+    current === LIGHT_THEME ? DARK_THEME : LIGHT_THEME;
   setTheme(next);
   return next;
 }
@@ -57,3 +60,5 @@ export function initTheme() {
       });
   }
 }
+
+export { LIGHT_THEME, DARK_THEME };
