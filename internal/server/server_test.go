@@ -613,6 +613,12 @@ func TestStartWithListener_GracefulShutdown(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		if err := listener.Close(); err != nil {
+			t.Logf("failed to close listener: %v", err)
+		}
+	})
 
 	serverDone := make(chan error, 1)
 	go func() {
@@ -621,9 +627,10 @@ func TestStartWithListener_GracefulShutdown(t *testing.T) {
 
 	// Wait for the server to start and open a long-lived SSE connection.
 	addr := listener.Addr().String()
+	sseClient := &http.Client{Timeout: 2 * time.Second}
 	var sseResp *http.Response
 	for range 20 {
-		resp, reqErr := http.Get("http://" + addr + "/api/events")
+		resp, reqErr := sseClient.Get("http://" + addr + "/api/events")
 		if reqErr == nil {
 			sseResp = resp
 			break
