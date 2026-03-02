@@ -77,10 +77,15 @@
   });
 </script>
 
-<div class="p-4 max-w-5xl mx-auto space-y-6">
-  <h1 class="text-2xl font-bold">Plan</h1>
+<div class="page-shell page-stack">
+  <div class="page-head">
+    <h1 class="page-title">Plan</h1>
+    <p class="page-subtitle">
+      Trigger a dry-run and inspect the exact operations before applying sync.
+    </p>
+  </div>
 
-  <div class="card bg-base-200 shadow-sm">
+  <div class="card surface-card">
     <div class="card-body p-4">
       <p class="text-sm text-base-content/70">
         Generate a dry-run plan to preview what changes would be applied.
@@ -118,7 +123,7 @@
     {#if loading && !planRun}
       <LoadingState message="Loading plan results…" />
     {:else if planRun}
-      <div class="flex items-center gap-2 text-sm">
+      <div class="flex flex-wrap items-center gap-2 text-sm">
         <StatusBadge status={planRun.status} />
         <span class="font-mono text-xs">{planRunId}</span>
         {#if planRun.status === "running"}
@@ -136,8 +141,12 @@
             <span>No changes detected – everything is in sync.</span>
           </div>
         {:else}
-          <ConflictAlert count={plan.conflicts.length} />
-          <PlanOpsTable ops={plan.ops} layout="cards" />
+          <div class="card surface-card">
+            <div class="card-body p-4 space-y-4">
+              <ConflictAlert count={plan.conflicts.length} />
+              <PlanOpsTable ops={plan.ops} layout="cards" />
+            </div>
+          </div>
         {/if}
       {:else}
         <EmptyState message="No plan data available." />

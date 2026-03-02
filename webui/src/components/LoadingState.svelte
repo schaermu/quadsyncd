@@ -3,10 +3,12 @@
 </script>
 
 <div
-  class="flex flex-col items-center justify-center py-16 gap-4"
+  class="card surface-card mx-auto max-w-md"
   role="status"
   aria-live="polite"
 >
-  <span class="loading loading-spinner loading-lg text-primary"></span>
-  <p class="text-base-content/60">{message}</p>
+  <div class="card-body items-center py-10 text-center">
+    <span class="loading loading-spinner loading-lg text-primary"></span>
+    <p class="text-sm text-base-content/70">{message}</p>
+  </div>
 </div>

@@ -106,10 +106,11 @@
   });
 </script>
 
-<div class="p-4 max-w-6xl mx-auto space-y-4">
-  <div class="flex items-center gap-2">
-    <a href="/runs" use:link class="btn btn-ghost btn-sm">← Runs</a>
-    <h1 class="text-xl font-bold font-mono">{params.id}</h1>
+<div class="page-shell page-stack">
+  <div class="flex flex-wrap items-center gap-2">
+    <a href="/runs" use:link class="btn btn-sm btn-ghost">← Runs</a>
+    <h1 class="text-lg font-bold font-mono sm:text-xl">{params.id}</h1>
+    <span class="badge badge-outline badge-sm">Run Detail</span>
   </div>
 
   {#if loading}
@@ -118,7 +119,7 @@
     <ErrorState message={error} onretry={load} />
   {:else if run}
     <!-- Tab navigation -->
-    <div role="tablist" class="tabs tabs-bordered">
+    <div role="tablist" class="tabs tabs-box bg-base-200">
       <button
         id="tab-logs"
         role="tab"
@@ -151,56 +152,53 @@
     <!-- Logs Tab -->
     {#if activeTab === "logs"}
       <div role="tabpanel" aria-labelledby="tab-logs">
-      <div class="space-y-2">
-        <!-- Filter bar -->
-        <div class="flex flex-wrap gap-2 items-center">
-          <select
-            class="select select-sm select-bordered w-32"
-            bind:value={levelFilter}
-          >
-            <option value="">All levels</option>
-            <option value="debug">DEBUG</option>
-            <option value="info">INFO</option>
-            <option value="warn">WARN</option>
-            <option value="error">ERROR</option>
-          </select>
-          <input
-            type="text"
-            placeholder="Search logs…"
-            class="input input-sm input-bordered flex-1 min-w-[150px]"
-            bind:value={searchFilter}
-          />
-          <label class="label cursor-pointer gap-1">
-            <span class="label-text text-xs">Wrap</span>
-            <input
-              type="checkbox"
-              class="toggle toggle-xs"
-              bind:checked={wrapLogs}
-            />
-          </label>
-        </div>
+        <div class="card surface-card">
+          <div class="card-body p-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <select class="select select-sm w-32" bind:value={levelFilter}>
+                <option value="">All levels</option>
+                <option value="debug">DEBUG</option>
+                <option value="info">INFO</option>
+                <option value="warn">WARN</option>
+                <option value="error">ERROR</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Search logs…"
+                class="input input-sm flex-1 min-w-[150px]"
+                bind:value={searchFilter}
+              />
+              <label class="label cursor-pointer gap-1">
+                <span class="label-text text-xs">Wrap</span>
+                <input
+                  type="checkbox"
+                  class="toggle toggle-xs"
+                  bind:checked={wrapLogs}
+                />
+              </label>
+            </div>
 
-        <!-- Log output -->
-        {#if filteredLogs.length === 0}
-          <EmptyState message="No matching log entries." />
-        {:else}
-          <div
-            class="bg-base-300 rounded-box p-3 overflow-x-auto max-h-[600px] overflow-y-auto"
-          >
-            <pre
-              class="text-xs font-mono leading-relaxed {wrapLogs
-                ? 'whitespace-pre-wrap break-all'
-                : 'whitespace-pre'}"
-            >{#each filteredLogs as entry, i}<span
-                  class="log-line {levelColor(entry.level)}"
-                  ><span class="text-base-content/40 select-none"
-                    >{String(i + 1).padStart(4, " ")} </span
-                  ><span class="font-semibold">[{levelPrefix(entry.level)}]</span
-                  > {entry.msg ?? ""}{#if entry.error} error={entry.error}{/if}
+            {#if filteredLogs.length === 0}
+              <EmptyState message="No matching log entries." />
+            {:else}
+              <div
+                class="table-shell rounded-box p-3 overflow-x-auto max-h-[600px] overflow-y-auto"
+              >
+                <pre
+                  class="text-xs font-mono leading-relaxed {wrapLogs
+                    ? 'whitespace-pre-wrap break-all'
+                    : 'whitespace-pre'}"
+                >{#each filteredLogs as entry, i}<span
+                      class="log-line {levelColor(entry.level)}"
+                      ><span class="text-base-content/40 select-none"
+                        >{String(i + 1).padStart(4, " ")} </span
+                      ><span class="font-semibold">[{levelPrefix(entry.level)}]</span
+                      > {entry.msg ?? ""}{#if entry.error} error={entry.error}{/if}
 </span>{/each}</pre>
+              </div>
+            {/if}
           </div>
-        {/if}
-      </div>
+        </div>
       </div>
     {/if}
 
@@ -214,9 +212,11 @@
           <span>No changes detected – everything is in sync.</span>
         </div>
       {:else}
-        <div class="space-y-3">
+        <div class="card surface-card">
+          <div class="card-body p-4 space-y-3">
           <ConflictAlert count={plan.conflicts.length} />
           <PlanOpsTable ops={plan.ops} layout="table" />
+          </div>
         </div>
       {/if}
       </div>
@@ -226,7 +226,7 @@
     {#if activeTab === "meta"}
       <div role="tabpanel" aria-labelledby="tab-meta">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="card bg-base-200 shadow-sm">
+        <div class="card surface-card">
           <div class="card-body p-4 space-y-2">
             <h3 class="font-semibold">Run Info</h3>
             <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -249,7 +249,7 @@
         </div>
 
         {#if Object.keys(run.revisions ?? {}).length > 0}
-          <div class="card bg-base-200 shadow-sm">
+          <div class="card surface-card">
             <div class="card-body p-4 space-y-2">
               <h3 class="font-semibold">Revisions</h3>
               <div class="space-y-1">
@@ -269,7 +269,7 @@
         {/if}
 
         {#if run.conflicts && run.conflicts.length > 0}
-          <div class="card bg-base-200 shadow-sm md:col-span-2">
+          <div class="card surface-card md:col-span-2">
             <div class="card-body p-4 space-y-2">
               <h3 class="font-semibold text-warning">Conflicts</h3>
               <div class="overflow-x-auto">

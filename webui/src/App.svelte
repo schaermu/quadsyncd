@@ -20,7 +20,7 @@
 
 <div class="min-h-screen bg-base-100 text-base-content font-sans">
   <Header />
-  <main>
+  <main class="pb-8">
     <Router {routes} />
   </main>
 </div>

@@ -18,8 +18,8 @@ vi.mock("../lib/sse", () => ({
 
 // Mock theme module
 vi.mock("../lib/theme", () => ({
-  toggleTheme: vi.fn(() => "quadsyncd-dark"),
-  getCurrentTheme: vi.fn(() => "quadsyncd-light"),
+  toggleTheme: vi.fn(() => "dark"),
+  getCurrentTheme: vi.fn(() => "light"),
 }));
 
 import Header from "./Header.svelte";

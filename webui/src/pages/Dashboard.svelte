@@ -60,161 +60,136 @@
   });
 </script>
 
-<div class="p-4 max-w-5xl mx-auto space-y-6">
-  <h1 class="text-2xl font-bold">Dashboard</h1>
+<div class="page-shell page-stack">
+  <div class="page-head">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">
+      Live overview of sync activity, repository state, and recent runs.
+    </p>
+  </div>
 
   {#if loading}
     <LoadingState />
   {:else if error}
     <ErrorState message={error} onretry={load} />
   {:else}
-    <!-- Overview Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <!-- Last Run -->
-      <div class="card bg-base-200 shadow-sm">
-        <div class="card-body p-4">
-          <h2 class="card-title text-sm font-medium text-base-content/60">
-            Last Run
-          </h2>
-          {#if overview?.last_run_id}
-            <div class="flex items-center gap-2">
-              <StatusBadge status={overview.last_run_status ?? "unknown"} />
-              <a
-                href="/runs/{overview.last_run_id}"
-                use:link
-                class="font-mono text-sm link link-primary"
-              >
-                {overview.last_run_id}
-              </a>
-            </div>
-          {:else}
-            <p class="text-sm text-base-content/50">No runs yet</p>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Timer -->
-      <div class="card bg-base-200 shadow-sm">
-        <div class="card-body p-4">
-          <h2 class="card-title text-sm font-medium text-base-content/60">
-            Sync Timer
-          </h2>
-          {#if timer}
-            <div class="flex items-center gap-2">
-              <span
-                class="badge badge-sm {timer.active
-                  ? 'badge-success'
-                  : 'badge-neutral'}"
-              >
-                {timer.active ? "active" : "inactive"}
-              </span>
-              <span class="text-sm font-mono">{timer.unit}</span>
-            </div>
-          {:else}
-            <p class="text-sm text-base-content/50">Unknown</p>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Repositories -->
-      <div class="card bg-base-200 shadow-sm">
-        <div class="card-body p-4">
-          <h2 class="card-title text-sm font-medium text-base-content/60">
-            Repositories
-          </h2>
-          <p class="text-2xl font-bold">
-            {overview?.repositories?.length ?? 0}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Repositories detail -->
-    {#if overview?.repositories && overview.repositories.length > 0}
-      <div class="card bg-base-200 shadow-sm">
-        <div class="card-body p-4">
-          <h2 class="text-lg font-semibold">Tracked Repositories</h2>
-          <div class="overflow-x-auto">
-            <table class="table table-sm">
-              <thead>
-                <tr>
-                  <th scope="col">URL</th>
-                  <th scope="col">Ref</th>
-                  <th scope="col">Current SHA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each overview.repositories as repo}
-                  <tr>
-                    <td class="font-mono text-xs break-all">{repo.url}</td>
-                    <td class="font-mono text-xs">{repo.ref ?? "—"}</td>
-                    <td class="font-mono text-xs">{shortSha(repo.sha)}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+    <div class="stats stats-vertical lg:stats-horizontal surface-card">
+      <div class="stat">
+        <div class="stat-title">Last Run</div>
+        {#if overview?.last_run_id}
+          <div class="stat-value text-lg sm:text-xl">
+            <a
+              href="/runs/{overview.last_run_id}"
+              use:link
+              class="font-mono link link-primary"
+            >
+              {overview.last_run_id}
+            </a>
           </div>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Recent Runs -->
-    <div class="card bg-base-200 shadow-sm">
-      <div class="card-body p-4">
-        <div class="flex items-center justify-between">
-          <h2 class="text-lg font-semibold">Recent Runs</h2>
-          <a href="/runs" use:link class="btn btn-ghost btn-xs">View all →</a>
-        </div>
-        {#if recentRuns.length === 0}
-          <EmptyState message="No runs recorded yet." />
+          <div class="stat-desc mt-2">
+            <StatusBadge status={overview.last_run_status ?? "unknown"} />
+          </div>
         {:else}
-          <div class="overflow-x-auto">
-            <table class="table table-sm">
-              <thead>
-                <tr>
-                  <th scope="col">ID</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Trigger</th>
-                  <th scope="col">Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each recentRuns as run}
-                  <tr>
-                    <td>
-                      <a
-                        href="/runs/{run.id}"
-                        use:link
-                        class="font-mono text-xs link link-primary"
-                      >
-                        {run.id}
-                      </a>
-                    </td>
-                    <td>
-                      <span class="badge badge-xs badge-outline">{run.kind}</span
-                      >
-                      {#if run.dry_run}
-                        <span class="badge badge-xs badge-ghost ml-1"
-                          >dry-run</span
-                        >
-                      {/if}
-                    </td>
-                    <td><StatusBadge status={run.status} /></td>
-                    <td class="text-xs">{run.trigger}</td>
-                    <td
-                      class="text-xs"
-                      title={formatTimestamp(run.started_at)}
-                    >
-                      {formatRelativeTime(run.started_at)}
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
+          <div class="stat-value text-lg">—</div>
+          <div class="stat-desc">No runs yet</div>
         {/if}
       </div>
+
+      <div class="stat">
+        <div class="stat-title">Sync Timer</div>
+        <div class="stat-value text-lg sm:text-xl">
+          {timer?.active ? "Active" : "Inactive"}
+        </div>
+        <div class="stat-desc font-mono text-xs">
+          {timer?.unit ?? "Unknown"}
+        </div>
+      </div>
+
+      <div class="stat">
+        <div class="stat-title">Repositories</div>
+        <div class="stat-value text-lg sm:text-xl">
+          {overview?.repositories?.length ?? 0}
+        </div>
+        <div class="stat-desc">
+          <span class="badge badge-ghost badge-sm">configured sources</span>
+        </div>
+      </div>
     </div>
+
+    {#if overview?.repositories && overview.repositories.length > 0}
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="card-title text-base">Tracked Repositories</h2>
+        <span class="badge badge-outline badge-sm">
+          {overview.repositories.length}
+        </span>
+      </div>
+      <div class="table-shell overflow-x-auto">
+        <table class="table table-sm table-zebra">
+          <thead>
+            <tr>
+              <th scope="col">URL</th>
+              <th scope="col">Ref</th>
+              <th scope="col">Current SHA</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each overview.repositories as repo}
+              <tr>
+                <td class="font-mono text-xs break-all">{repo.url}</td>
+                <td class="font-mono text-xs">{repo.ref ?? "—"}</td>
+                <td class="font-mono text-xs">{shortSha(repo.sha)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+    <div class="flex items-center justify-between">
+      <h2 class="card-title text-base">Recent Runs</h2>
+      <a href="/runs" use:link class="btn btn-sm btn-ghost">View all →</a>
+    </div>
+    {#if recentRuns.length === 0}
+      <EmptyState message="No runs recorded yet." />
+    {:else}
+      <div class="table-shell overflow-x-auto">
+        <table class="table table-sm table-zebra">
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Status</th>
+              <th scope="col">Trigger</th>
+              <th scope="col">Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each recentRuns as run}
+              <tr>
+                <td>
+                  <a
+                    href="/runs/{run.id}"
+                    use:link
+                    class="font-mono text-xs link link-primary"
+                  >
+                    {run.id}
+                  </a>
+                </td>
+                <td>
+                  <span class="badge badge-xs badge-outline">{run.kind}</span>
+                  {#if run.dry_run}
+                    <span class="badge badge-xs badge-ghost ml-1">dry-run</span>
+                  {/if}
+                </td>
+                <td><StatusBadge status={run.status} /></td>
+                <td class="text-xs">{run.trigger}</td>
+                <td class="text-xs" title={formatTimestamp(run.started_at)}>
+                  {formatRelativeTime(run.started_at)}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </div>

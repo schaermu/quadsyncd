@@ -2,7 +2,9 @@
   let { message = "Nothing here yet." }: { message?: string } = $props();
 </script>
 
-<div class="flex flex-col items-center justify-center py-16 gap-4">
-  <div class="text-base-content/30 text-4xl">∅</div>
-  <p class="text-base-content/50">{message}</p>
+<div class="card border border-dashed border-base-content/20 bg-base-200/60">
+  <div class="card-body items-center py-10 text-center">
+    <div class="text-base-content/40 text-4xl">∅</div>
+    <p class="text-sm text-base-content/60">{message}</p>
+  </div>
 </div>
