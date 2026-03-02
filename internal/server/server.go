@@ -138,6 +138,11 @@ func (s *Server) StartWithListener(ctx context.Context, listener net.Listener) e
 		WriteTimeout:   30 * time.Second,
 		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
+		// BaseContext propagates the server context into every request context.
+		// This allows long-lived connections (e.g. SSE) to detect shutdown via
+		// r.Context().Done() and exit promptly, so httpServer.Shutdown can
+		// drain connections without hitting its timeout.
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 
 	errCh := make(chan error, 1)

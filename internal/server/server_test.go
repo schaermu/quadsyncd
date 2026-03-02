@@ -587,6 +587,75 @@ func TestStartWithListener_SkipInitialSync(t *testing.T) {
 	}
 }
 
+func TestStartWithListener_GracefulShutdown(t *testing.T) {
+	cfg, _ := setupTestConfig(t)
+	logger := testutil.TestLogger()
+
+	if err := os.MkdirAll(cfg.Paths.QuadletDir, 0755); err != nil {
+		t.Fatalf("failed to create quadlet dir: %v", err)
+	}
+	if err := os.MkdirAll(cfg.Paths.StateDir, 0755); err != nil {
+		t.Fatalf("failed to create state dir: %v", err)
+	}
+
+	mockGit := &testutil.MockGitClient{}
+	mockSys := &testutil.MockSystemd{Available: true}
+
+	srv, err := NewServer(cfg, quadsyncd.NewRunnerFactory(testutil.MockGitFactory(mockGit), mockSys), mockSys, runstore.NewStore(cfg.Paths.StateDir, logger), logger)
+	if err != nil {
+		t.Fatalf("NewServer() failed: %v", err)
+	}
+	srv.SetSkipInitialSync(true)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		if err := listener.Close(); err != nil {
+			t.Logf("failed to close listener: %v", err)
+		}
+	})
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- srv.StartWithListener(ctx, listener)
+	}()
+
+	// Wait for the server to start and open a long-lived SSE connection.
+	addr := listener.Addr().String()
+	sseClient := &http.Client{Timeout: 2 * time.Second}
+	var sseResp *http.Response
+	for range 20 {
+		resp, reqErr := sseClient.Get("http://" + addr + "/api/events")
+		if reqErr == nil {
+			sseResp = resp
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sseResp == nil {
+		t.Fatal("could not connect to SSE endpoint")
+	}
+	defer func() { _ = sseResp.Body.Close() }()
+
+	// Cancel the server context, simulating CTRL+C.
+	cancel()
+
+	// The server must shut down cleanly (no error) well within the 5 s shutdown timeout.
+	select {
+	case err := <-serverDone:
+		if err != nil {
+			t.Errorf("StartWithListener returned unexpected error on shutdown: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Error("server did not shut down within 4 seconds after context cancellation")
+	}
+}
+
 func TestSliceContains(t *testing.T) {
 	tests := []struct {
 		name  string
