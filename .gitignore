@@ -27,7 +27,7 @@ vendor/
 
 # goreleaser
 dist/
-!internal/webui/dist/
+internal/webui/dist/
 
 # Local configuration and state
 config.yaml

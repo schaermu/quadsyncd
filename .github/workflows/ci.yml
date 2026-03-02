@@ -39,7 +39,7 @@ jobs:
               - 'webui/**'
 
   codeql-go:
-    needs: changes
+    needs: [changes, webui-build]
     if: github.event_name == 'push' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -49,6 +49,11 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download WebUI dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: webui-dist
+          path: internal/webui/dist
       - uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
         with:
           languages: go
@@ -83,7 +88,8 @@ jobs:
       - uses: github/codeql-action/analyze@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
 
   lint:
-    needs: changes
+    needs: [changes, webui-build]
+    if: github.event_name == 'push' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -92,6 +98,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Download WebUI dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: webui-dist
+          path: internal/webui/dist
 
       - name: Verify tidy
         run: |
@@ -105,18 +117,27 @@ jobs:
           version: v2.10.1
 
   vuln-check:
-    needs: changes
+    needs: [changes, webui-build]
+    if: github.event_name == 'push' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Run govulncheck
-        if: needs.changes.outputs.go == 'true'
-        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version-file: go.mod
+          cache: true
+      - name: Download WebUI dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: webui-dist
+          path: internal/webui/dist
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   test:
-    needs: changes
+    needs: [changes, webui-build]
+    if: github.event_name == 'push' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -127,6 +148,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Download WebUI dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: webui-dist
+          path: internal/webui/dist
 
       - name: Test
         run: go test -v -race -coverprofile=coverage.txt ./...
@@ -269,7 +296,7 @@ jobs:
 
   webui-build:
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.webui == 'true'
+    if: github.event_name == 'push' || needs.changes.outputs.webui == 'true' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
