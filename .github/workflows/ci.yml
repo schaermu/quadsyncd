@@ -54,13 +54,13 @@ jobs:
         with:
           name: webui-dist
           path: internal/webui/dist
-      - uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+      - uses: github/codeql-action/init@c793b717bc78562f491db7b0e93a3a178b099162 # v4.32.5
         with:
           languages: go
           build-mode: manual
       - name: Build for CodeQL analysis
         run: make build-codeql
-      - uses: github/codeql-action/analyze@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+      - uses: github/codeql-action/analyze@c793b717bc78562f491db7b0e93a3a178b099162 # v4.32.5
 
   codeql-webui:
     needs: changes
@@ -78,14 +78,14 @@ jobs:
           node-version: '22.x'
           cache: npm
           cache-dependency-path: webui/package-lock.json
-      - uses: github/codeql-action/init@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+      - uses: github/codeql-action/init@c793b717bc78562f491db7b0e93a3a178b099162 # v4.32.5
         with:
           languages: javascript-typescript
           config-file: ./.github/codeql/codeql-config.yml
       - name: Install webui dependencies
         run: npm ci
         working-directory: webui
-      - uses: github/codeql-action/analyze@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+      - uses: github/codeql-action/analyze@c793b717bc78562f491db7b0e93a3a178b099162 # v4.32.5
 
   lint:
     needs: [changes, webui-build]
