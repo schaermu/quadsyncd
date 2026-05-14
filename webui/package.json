@@ -23,7 +23,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "daisyui": "^5.5.19",
     "jsdom": "^28.1.0",
-    "svelte": "^5.45.2",
+    "svelte": "^5.55.7",
     "svelte-check": "^4.3.4",
     "svelte-spa-router": "^4.0.1",
     "tailwindcss": "^4.2.1",
